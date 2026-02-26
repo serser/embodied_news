@@ -85,6 +85,61 @@ CACHE_DURATION = 300
 
 
 def generate_placeholder_image(title, company):
+    """Generate an artistic placeholder SVG image based on title hash."""
+    import base64
+    
+    # Create a hash from title to get consistent colors
+    hash_obj = hashlib.md5(title.encode())
+    hash_int = int(hash_obj.hexdigest()[:8], 16)
+    
+    # Get company color as primary
+    primary = COMPANY_COLORS.get(company, "#6366f1")
+    
+    # Generate colors based on hash
+    h1 = (hash_int % 360)
+    hue2 = (h1 + 30) % 360
+    
+    # Convert HSL to hex (simplified)
+    def hsl_to_hex(h, s=70, l=50):
+        h = h / 360
+        if s == 0:
+            return f'#{l:02x}{l:02x}{l:02x}'
+        q = l * (1 + s/100) / 100 if l < 50 else l + s - l * s / 100
+        p = 2 * l - q
+        def hue_to_rgb(p, q, t):
+            t = t % 1
+            if t < 1/6: return p + (q - p) * 6 * t
+            if t < 1/2: return q
+            if t < 2/3: return p + (q - p) * (2/3 - t) * 6
+            return p
+        r = int(hue_to_rgb(p, q, h + 1/3) * 255)
+        g = int(hue_to_rgb(p, q, h) * 255)
+        b = int(hue_to_rgb(p, q, h - 1/3) * 255)
+        return f'#{r:02x}{g:02x}{b:02x}'
+    
+    color1 = hsl_to_hex(h1, 60, 45)
+    color2 = hsl_to_hex(hue2, 70, 35)
+    
+    # Generate abstract SVG with the title
+    title_short = title[:35] + "..." if len(title) > 35 else title
+    
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">
+      <defs>
+        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:{color1};stop-opacity:1" />
+          <stop offset="100%" style="stop-color:{color2};stop-opacity:1" />
+        </linearGradient>
+      </defs>
+      <rect width="600" height="400" fill="url(#grad)"/>
+      <circle cx="{100 + (hash_int % 200)}" cy="{80 + (hash_int % 100)}" r="{50 + (hash_int % 100)}" fill="{color2}" opacity="0.3"/>
+      <circle cx="{300 + (hash_int % 150)}" cy="{200 + (hash_int % 80)}" r="{80 + (hash_int % 60)}" fill="{color1}" opacity="0.2"/>
+      <text x="300" y="220" font-family="Arial, sans-serif" font-size="22" fill="white" text-anchor="middle">{title_short}</text>
+      <text x="300" y="255" font-family="Arial, sans-serif" font-size="14" fill="white" text-anchor="middle" opacity="0.7">{company}</text>
+    </svg>'''
+    
+    # Return as data URI
+    svg_b64 = base64.b64encode(svg.encode('utf-8')).decode('utf-8')
+    return f"data:image/svg+xml;base64,{svg_b64}"
     """Generate an artistic placeholder image based on title hash."""
     # Create a hash from title to get consistent colors
     hash_obj = hashlib.md5(title.encode())
@@ -253,5 +308,5 @@ def refresh():
 
 if __name__ == '__main__':
     print("Starting Embodied AI News Aggregator...")
-    print("Visit http://localhost:80 to view the news feed")
-    app.run(debug=False, host='0.0.0.0', port=80)
+    print("Visit http://localhost:8000 to view the news feed")
+    app.run(debug=False, host='0.0.0.0', port=8080)

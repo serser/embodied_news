@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""
+Embodied AI News Aggregator - With Summaries
+"""
+
+from flask import Flask, render_template, jsonify
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import re
+
+app = Flask(__name__)
+
+BLOG_SOURCES = [
+    {"name": "Generalist AI", "url": "https://generalistai.com/blog/", "base_url": "https://generalistai.com", "color": "#6366f1"},
+    {"name": "Physical Intelligence", "url": "https://www.pi.website/blog", "base_url": "https://www.pi.website", "color": "#8b5cf6"},
+    {"name": "World Labs", "url": "https://www.worldlabs.ai/blog", "base_url": "https://www.worldlabs.ai", "color": "#ec4899"},
+    {"name": "Figure", "url": "https://www.figure.ai/news", "base_url": "https://www.figure.ai", "color": "#14b8a6"},
+    {"name": "Sunday Robotics", "url": "https://www.sunday.ai/journal", "base_url": "https://www.sunday.ai", "color": "#f59e0b"},
+    {"name": "Skild AI", "url": "https://www.skild.ai/blogs", "base_url": "https://www.skild.ai", "color": "#ef4444"}
+]
+
+# Fallback data with summaries
+FALLBACK_DATA = {
+    "Generalist AI": [
+        ("The Dark Matter of Robotics: Physical Commonsense", "https://generalistai.com/blog/jan-29-2026-physical-commonsense", datetime(2026, 1, 29), "Exploring physical commonsense as the reactive, closed-loop intelligence behind interacting in the physical world."),
+        ("GEN-0: Embodied Foundation Models That Scale", "https://generalistai.com/blog/nov-04-2025-GEN-0", datetime(2025, 11, 4), "Introducing GEN-0, a new class of embodied foundation models built for multimodal training on high-fidelity physical interaction."),
+        ("The Robots Build Now, Too", "https://generalistai.com/blog/sep-24-2025-the-robots-build-now-too", datetime(2025, 9, 24), "One-shot assembly: you build a Lego structure and the robot builds copies of it."),
+        ("Research Preview", "https://generalistai.com/blog/jun-17-2025-research-preview", datetime(2025, 6, 17), "A first look at what Generalist is building in robotics."),
+    ],
+    "World Labs": [
+        ("Announcing the World API", "https://www.worldlabs.ai/blog/announcing-the-world-api", datetime(2026, 1, 21), "A public API for generating explorable 3D worlds from text, images, and video."),
+        ("Marble: A Multimodal World Model", "https://www.worldlabs.ai/blog/marble-world-model", datetime(2025, 11, 12), "Marble, our frontier multimodal world model, is now available to everyone."),
+        ("From Words to Worlds: Spatial Intelligence", "https://www.worldlabs.ai/blog/spatial-intelligence", datetime(2025, 11, 10), "A manifesto on spatial intelligence - AI's next frontier and how world models will unlock it."),
+        ("RTFM: A Real-Time Frame Model", "https://www.worldlabs.ai/blog/rtfm", datetime(2025, 10, 16), "A research preview of RTFM - a generative world model that generates video in real-time."),
+        ("Generating Bigger and Better Worlds", "https://www.worldlabs.ai/blog/bigger-better-worlds", datetime(2025, 9, 16), "Latest breakthrough in 3D world generation with larger, more detailed environments."),
+        ("Generating Worlds", "https://www.worldlabs.ai/blog/generating-worlds", datetime(2024, 12, 2), "Early progress toward persistent, navigable 3D worlds you can explore in your browser."),
+        ("World Labs Announces New Funding", "https://www.worldlabs.ai/blog/funding-2026", datetime(2026, 2, 18), "An update on our vision for spatial intelligence in 2026."),
+    ],
+    "Skild AI": [
+        ("Skild AI Expands Global Footprint To Bengaluru", "https://www.skild.ai/blogs/bengaluru", datetime(2026, 2, 19), "Skild AI announces expansion to Bengaluru, India."),
+        ("Announcing Series C", "https://www.skild.ai/blogs/series-c", datetime(2026, 1, 14), "Skild AI announces Series C funding round."),
+        ("Learning by watching human videos", "https://www.skild.ai/blogs/learning-by-watching", datetime(2026, 1, 12), "Training robot models by learning from human videos."),
+        ("The case for an omni-bodied robot brain", "https://www.skild.ai/blogs/omni-bodied", datetime(2025, 9, 24), "Why a general-purpose robot brain should work across any robot body."),
+        ("One Model, Any Scenario", "https://www.skild.ai/blogs/one-policy-all-scenarios", datetime(2025, 8, 6), "End-to-end locomotion from vision - one model for any scenario."),
+        ("Building the general-purpose robotic brain", "https://www.skild.ai/blogs/building-the-general-purpose-robotic-brain", datetime(2025, 7, 29), "Building the foundation for general-purpose robotics."),
+    ],
+    "Sunday Robotics": [
+        ("ACT-1: A Robot Foundation Model Trained on Zero Robot Data", "https://www.sunday.ai/journal/no-robot-data", datetime(2025, 11, 19), "Sunday's first technical blog - ACT-1, a robot foundation model trained on zero robot data."),
+        ("This Home Robot Clears Tables and Loads the Dishwasher", "https://www.wired.com/story/memo-sunday-robotics-home-robot/", datetime(2025, 11, 19), "WIRED coverage of Sunday's home robot capabilities."),
+        ("No Priors Episode | Conviction", "https://www.youtube.com/watch?v=4-VzXoZqAH0", datetime(2025, 11, 19), "Sunday Robotics on the No Priors podcast."),
+    ],
+    "Physical Intelligence": [
+        ("The Physical Intelligence Layer", "https://www.pi.website/blog/partner", datetime(2026, 2, 24), "General-purpose physical intelligence models will enable a Cambrian explosion of robotics applications."),
+        ("Moravec's Paradox and the Robot Olympics", "https://www.pi.website/blog/olympics", datetime(2025, 12, 22), "Fine-tuning models on difficult manipulation challenge tasks."),
+        ("Emergence of Human to Robot Transfer in VLAs", "https://www.pi.website/research/human_to_robot", datetime(2025, 12, 16), "Exploring how transfer from human videos to robotic tasks emerges in VLAs as they scale."),
+        ("π*0.6: a VLA that Learns from Experience", "https://www.pi.website/blog/pistar06", datetime(2025, 11, 17), "Training generalist policies with RL to improve success rate and throughput."),
+        ("Real-Time Action Chunking with Large Models", "https://www.pi.website/research/real_time_chunking", datetime(2025, 6, 9), "A real-time system for large VLAs that maintains precision and speed."),
+        ("VLAs that Train Fast, Run Fast, and Generalize Better", "https://www.pi.website/research/knowledge_insulation", datetime(2025, 5, 28), "A method to train VLAs that train quickly and generalize well."),
+        ("π0.5: a VLA with Open-World Generalization", "https://www.pi.website/blog/pi05", datetime(2025, 4, 22), "Our latest generalist policy that enables open-world generalization."),
+        ("Teaching Robots to Listen and Think Harder", "https://www.pi.website/research/hirobot", datetime(2025, 2, 26), "A method for robots to think through complex tasks step by step."),
+        ("Open Sourcing π0", "https://www.pi.website/blog/openpi", datetime(2025, 2, 4), "Releasing the weights and code for π0 and π0-FAST."),
+        ("FAST: Efficient Robot Action Tokenization", "https://www.pi.website/research/fast", datetime(2025, 1, 16), "A new robot action tokenizer that trains generalist policies 5x faster."),
+        ("π0: Our First Generalist Policy", "https://www.pi.website/blog/pi0", datetime(2024, 10, 31), "Our first generalist policy combining large-scale data with a new architecture."),
+    ],
+}
+
+cache_lock = threading.RLock()
+cached_posts = []
+cache_timestamp = None
+CACHE_DURATION = 300
+
+
+def fetch_figure(soup, base_url):
+    """Parse Figure blog posts."""
+    posts = []
+    for link in soup.find_all('a', href=True):
+        href = link.get('href', '')
+        if not href.startswith('/news/'):
+            continue
+        parent = link.find_parent(['div', 'li', 'article'])
+        if not parent:
+            continue
+        title_elem = parent.find(['h1', 'h2', 'h3', 'h4'])
+        title = title_elem.get_text(strip=True) if title_elem else link.get_text(strip=True)
+        
+        # Try to get description/summary
+        summary = ""
+        desc_elem = parent.find('p')
+        if desc_elem:
+            summary = desc_elem.get_text(strip=True)[:200]
+        
+        date_elem = parent.find(string=lambda t: t and any(m in t for m in ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']))
+        if date_elem:
+            try:
+                date = datetime.strptime(date_elem.strip(), '%B %d, %Y')
+                if date and title and len(title) > 3:
+                    full_url = href if href.startswith('http') else f"{base_url}{href}"
+                    posts.append({"title": title, "url": full_url, "date": date, "summary": summary, "company": "Figure"})
+            except:
+                pass
+    return posts
+
+
+def fetch_blog_posts(source):
+    """Fetch and parse blog posts from a single source."""
+    company = source["name"]
+    
+    # Use fallback data
+    if company in FALLBACK_DATA:
+        return [{"title": t, "url": u, "date": d, "summary": s, "company": company} for t, u, d, s in FALLBACK_DATA[company]]
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(source["url"], headers=headers, timeout=15)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        if company == "Figure":
+            return fetch_figure(soup, source["base_url"])
+    except Exception as e:
+        print(f"Error fetching {company}: {e}")
+    
+    return []
+
+
+def get_all_posts():
+    global cached_posts, cache_timestamp
+    
+    with cache_lock:
+        now = datetime.now()
+        if cache_timestamp and cached_posts and (now - cache_timestamp).seconds < CACHE_DURATION:
+            return cached_posts
+    
+    all_posts = []
+    
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(fetch_blog_posts, source): source for source in BLOG_SOURCES}
+        for future in as_completed(futures):
+            source = futures[future]
+            try:
+                posts = future.result()
+                all_posts.extend(posts)
+                print(f"Fetched {len(posts)} posts from {source['name']}")
+            except Exception as e:
+                print(f"Error fetching {source['name']}: {e}")
+    
+    # Sort by date descending
+    all_posts.sort(key=lambda x: x["date"], reverse=True)
+    
+    # Deduplicate
+    seen = set()
+    unique_posts = []
+    for post in all_posts:
+        key = (post["title"].strip().lower(), post["company"])
+        if key not in seen:
+            seen.add(key)
+            unique_posts.append(post)
+    
+    with cache_lock:
+        cached_posts = unique_posts
+        cache_timestamp = datetime.now()
+    
+    return unique_posts
+
+
+@app.route('/')
+def index():
+    posts = get_all_posts()
+    by_company = {}
+    for post in posts:
+        company = post["company"]
+        if company not in by_company:
+            by_company[company] = []
+        by_company[company].append(post)
+    company_colors = {s["name"]: s["color"] for s in BLOG_SOURCES}
+    return render_template('index.html', posts=posts, by_company=by_company, company_colors=company_colors, companies=BLOG_SOURCES)
+
+
+@app.route('/api/posts')
+def api_posts():
+    posts = get_all_posts()
+    return jsonify([{
+        "title": p["title"],
+        "url": p["url"],
+        "date": p["date"].isoformat(),
+        "summary": p.get("summary", ""),
+        "company": p["company"]
+    } for p in posts])
+
+
+@app.route('/refresh')
+def refresh():
+    global cache_timestamp
+    with cache_lock:
+        cache_timestamp = None
+    posts = get_all_posts()
+    return jsonify({"status": "ok", "posts_count": len(posts)})
+
+
+if __name__ == '__main__':
+    print("Starting Embodied AI News Aggregator...")
+    print("Visit http://localhost:5000 to view the news feed")
+    app.run(debug=True, host='0.0.0.0', port=5000)

@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import re
 import hashlib
+import base64
 
 app = Flask(__name__)
 
@@ -20,20 +21,20 @@ BLOG_SOURCES = [
     {"name": "World Labs", "url": "https://www.worldlabs.ai/blog", "base_url": "https://www.worldlabs.ai", "color": "#ec4899"},
     {"name": "Figure", "url": "https://www.figure.ai/news", "base_url": "https://www.figure.ai", "color": "#14b8a6"},
     {"name": "Sunday Robotics", "url": "https://www.sunday.ai/journal", "base_url": "https://www.sunday.ai", "color": "#f59e0b"},
-    {"name": "Skild AI", "url": "https://www.skild.ai/blogs", "base_url": "https://www.skild.ai", "color": "#ef4444"}
+    {"name": "Skild AI", "url": "https://www.skild.ai/blogs", "base_url": "https://www.skild.ai", "color": "#ef4444"},
+    {"name": "NVIDIA GEAR", "url": "https://research.nvidia.com/labs/gear/", "base_url": "https://research.nvidia.com", "color": "#76b900"}
 ]
 
-# Company colors for gradient generation
 COMPANY_COLORS = {
     "Generalist AI": "#6366f1",
     "Physical Intelligence": "#8b5cf6",
     "World Labs": "#ec4899",
     "Figure": "#14b8a6",
     "Sunday Robotics": "#f59e0b",
-    "Skild AI": "#ef4444"
+    "Skild AI": "#ef4444",
+    "NVIDIA GEAR": "#76b900"
 }
 
-# Fallback data with image URLs (image_url can be None for auto-generation)
 FALLBACK_DATA = {
     "Generalist AI": [
         ("The Dark Matter of Robotics: Physical Commonsense", "https://generalistai.com/blog/jan-29-2026-physical-commonsense", datetime(2026, 1, 29), "Exploring physical commonsense as the reactive, closed-loop intelligence behind interacting in the physical world.", None),
@@ -76,6 +77,14 @@ FALLBACK_DATA = {
         ("FAST: Efficient Robot Action Tokenization", "https://www.pi.website/research/fast", datetime(2025, 1, 16), "A new robot action tokenizer that trains generalist policies 5x faster.", None),
         ("π0: Our First Generalist Policy", "https://www.pi.website/blog/pi0", datetime(2024, 10, 31), "Our first generalist policy combining large-scale data with a new architecture.", None),
     ],
+    "NVIDIA GEAR": [
+        ("Project GR00T: Foundation Model for Humanoid Robots", "https://developer.nvidia.com/project-gr00t", datetime(2024, 3, 18), "NVIDIA's foundation model for building general-purpose humanoid robots.", None),
+        ("Eureka: Human-Level Reward Design via Coding LLMs", "https://eureka-research.github.io/", datetime(2023, 10, 15), "NVIDIA's AI agent that writes reward code for robot training.", None),
+        ("Voyager: Open-Ended Embodied Agent with LLMs", "https://voyager.minedojo.org/", datetime(2023, 5, 15), "An open-ended embodied agent that uses LLMs for lifelong learning in Minecraft.", None),
+        ("MimicPlay: Long-Horizon Imitation Learning", "https://mimic-play.github.io/", datetime(2023, 3, 20), "Learning long-horizon manipulation tasks from human videos.", None),
+        ("VIMA: Robot Manipulation with Multimodal Prompts", "https://vimalabs.github.io/", datetime(2023, 2, 10), "Generalist robot manipulation with multimodal prompt understanding.", None),
+        ("MineDojo: Open-Ended Embodied Agents", "https://minedojo.org/", datetime(2022, 10, 20), "Building open-ended embodied agents in Minecraft using internet knowledge.", None),
+    ],
 }
 
 cache_lock = threading.RLock()
@@ -86,20 +95,13 @@ CACHE_DURATION = 300
 
 def generate_placeholder_image(title, company):
     """Generate an artistic placeholder SVG image based on title hash."""
-    import base64
-    
-    # Create a hash from title to get consistent colors
     hash_obj = hashlib.md5(title.encode())
     hash_int = int(hash_obj.hexdigest()[:8], 16)
     
-    # Get company color as primary
     primary = COMPANY_COLORS.get(company, "#6366f1")
-    
-    # Generate colors based on hash
     h1 = (hash_int % 360)
     hue2 = (h1 + 30) % 360
     
-    # Convert HSL to hex (simplified)
     def hsl_to_hex(h, s=70, l=50):
         h = h / 360
         if s == 0:
@@ -119,8 +121,6 @@ def generate_placeholder_image(title, company):
     
     color1 = hsl_to_hex(h1, 60, 45)
     color2 = hsl_to_hex(hue2, 70, 35)
-    
-    # Generate abstract SVG with the title
     title_short = title[:35] + "..." if len(title) > 35 else title
     
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">
@@ -137,32 +137,8 @@ def generate_placeholder_image(title, company):
       <text x="300" y="255" font-family="Arial, sans-serif" font-size="14" fill="white" text-anchor="middle" opacity="0.7">{company}</text>
     </svg>'''
     
-    # Return as data URI
     svg_b64 = base64.b64encode(svg.encode('utf-8')).decode('utf-8')
     return f"data:image/svg+xml;base64,{svg_b64}"
-    """Generate an artistic placeholder image based on title hash."""
-    # Create a hash from title to get consistent colors
-    hash_obj = hashlib.md5(title.encode())
-    hash_int = int(hash_obj.hexdigest(), 16)
-    
-    # Get company color as primary
-    primary = COMPANY_COLORS.get(company, "#6366f1")
-    
-    # Generate a secondary color by rotating hue
-    # Simple approach: use the gradients.durham.columbia.edu API or create local SVG
-    
-    # Use a gradient service with seed based on title
-    # Generate colors based on hash
-    h1 = (hash_int % 360)
-    h2 = (h1 + 45) % 360
-    
-    # Use picsum for a real image with a seed
-    seed = hash_int % 1000
-    
-    # Use a gradient placeholder service
-    gradient_url = f"https://gradient.ishove.com/{primary.replace('#','')}/000000/{h1}/{h2}/600x400.png"
-    
-    return gradient_url
 
 
 def fetch_figure(soup, base_url):
@@ -178,13 +154,11 @@ def fetch_figure(soup, base_url):
         title_elem = parent.find(['h1', 'h2', 'h3', 'h4'])
         title = title_elem.get_text(strip=True) if title_elem else link.get_text(strip=True)
         
-        # Try to get description/summary
         summary = ""
         desc_elem = parent.find('p')
         if desc_elem:
             summary = desc_elem.get_text(strip=True)[:200]
         
-        # Try to get image
         image_url = None
         img_elem = parent.find('img', src=True)
         if img_elem:
@@ -206,12 +180,10 @@ def fetch_blog_posts(source):
     """Fetch and parse blog posts from a single source."""
     company = source["name"]
     
-    # Use fallback data
     if company in FALLBACK_DATA:
         posts = []
         for item in FALLBACK_DATA[company]:
             title, url, date, summary, image = item[:5]
-            # Generate placeholder if no image
             if image is None:
                 image = generate_placeholder_image(title, company)
             posts.append({"title": title, "url": url, "date": date, "summary": summary, "image": image, "company": company})
@@ -241,7 +213,7 @@ def get_all_posts():
     
     all_posts = []
     
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    with ThreadPoolExecutor(max_workers=7) as executor:
         futures = {executor.submit(fetch_blog_posts, source): source for source in BLOG_SOURCES}
         for future in as_completed(futures):
             source = futures[future]
@@ -252,10 +224,8 @@ def get_all_posts():
             except Exception as e:
                 print(f"Error fetching {source['name']}: {e}")
     
-    # Sort by date descending
     all_posts.sort(key=lambda x: x["date"], reverse=True)
     
-    # Deduplicate
     seen = set()
     unique_posts = []
     for post in all_posts:
@@ -308,5 +278,5 @@ def refresh():
 
 if __name__ == '__main__':
     print("Starting Embodied AI News Aggregator...")
-    print("Visit http://localhost:8000 to view the news feed")
-    app.run(debug=False, host='0.0.0.0', port=8080)
+    print("Visit http://localhost:80 to view the news feed")
+    app.run(debug=False, host='0.0.0.0', port=80)

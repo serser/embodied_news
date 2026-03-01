@@ -198,19 +198,6 @@
         }
         
         .post-company {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 1.5rem;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        
-        .post-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 30px rgba(99, 102, 241, 0.15);
-        }
-        
-        .post-company {
             display: inline-block;
             padding: 0.25rem 0.75rem;
             border-radius: 20px;
@@ -322,8 +309,9 @@
             padding-top: 0.25rem;
         }
         
-        .company-post-content {
+        .company-post-main {
             flex: 1;
+            min-width: 0;
         }
         
         .company-post-title {
@@ -354,21 +342,10 @@
             flex-shrink: 0;
         }
         
-        .company-post-main {
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .company-post {
-            display: flex;
-            gap: 1rem;
-            align-items: flex-start;
-        }
-        
-        /* Footer */
-            color: var(--text-secondary);
-            font-size: 0.85rem;
-            line-height: 1.4;
+        .post-source {
+            font-size: 0.75rem;
+            color: #6366f1;
+            margin-top: 0.25rem;
         }
         
         /* Footer */
@@ -417,6 +394,7 @@
             <nav>
                 <button class="nav-btn active" onclick="showView('timeline')">Timeline</button>
                 <button class="nav-btn" onclick="showView('company')">By Company</button>
+                <button class="nav-btn" onclick="showView('news-agent')">News Agent</button>
             </nav>
         </div>
     </header>
@@ -460,27 +438,6 @@
                 {% endfor %}
             </div>
         </section>
-        <section id="timeline-view" class="view-section active">
-            <div class="timeline">
-                {% for post in posts %}
-                <div class="timeline-item">
-                    <div class="timeline-date">{{ post.date.strftime('%B %d, %Y') }}</div>
-                    <div class="post-card">
-                        <span class="post-company" style="background: {{ company_colors[post.company] }}20; color: {{ company_colors[post.company] }}">{{ post.company }}</span>
-                        <h3 class="post-title">
-                            <a href="{{ post.url }}" target="_blank" rel="noopener">{{ post.title }}</a>
-                        </h3>
-                        {% if post.summary %}
-                        <p class="post-summary">{{ post.summary }}</p>
-                        {% endif %}
-                        <a href="{{ post.url }}" target="_blank" rel="noopener" class="post-link">
-                            Read more →
-                        </a>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </section>
         
         <!-- By Company View -->
         <section id="company-view" class="view-section">
@@ -506,19 +463,8 @@
                                 {% if post.summary %}
                                 <div class="company-post-summary">{{ post.summary }}</div>
                                 {% endif %}
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                        {% for post in company_posts %}
-                        <div class="company-post">
-                            <div class="company-post-date">{{ post.date.strftime('%b %d, %Y') }}</div>
-                            <div class="company-post-content">
-                                <div class="company-post-title">
-                                    <a href="{{ post.url }}" target="_blank" rel="noopener">{{ post.title }}</a>
-                                </div>
-                                {% if post.summary %}
-                                <div class="company-post-summary">{{ post.summary }}</div>
+                                {% if post.source %}
+                                <div class="post-source">{{ post.source }}</div>
                                 {% endif %}
                             </div>
                         </div>
@@ -543,8 +489,10 @@
             
             if (view === 'timeline') {
                 document.getElementById('timeline-view').classList.add('active');
-            } else {
+            } else if (view === 'company') {
                 document.getElementById('company-view').classList.add('active');
+            } else if (view === 'news-agent') {
+                window.location.href = '/news-agent';
             }
             
             localStorage.setItem('preferredView', view);

@@ -99,13 +99,14 @@ FALLBACK_DATA = {
         ("Research Preview", "https://generalistai.com/blog/jun-17-2025-research-preview", datetime(2025, 6, 17), "A first look at what Generalist is building in robotics.", None),
     ],
     "World Labs": [
+        ("3D as code", "https://www.worldlabs.ai/blog/3d-as-code", datetime(2026, 3, 3), "Text became the universal interface for software; 3D is becoming the universal interface for space.", "https://www.worldlabs.ai/_next/image?url=%2Fimages%2F3d-as-code.jpg&w=3840&q=75"),
         ("Announcing the World API", "https://www.worldlabs.ai/blog/announcing-the-world-api", datetime(2026, 1, 21), "A public API for generating explorable 3D worlds from text, images, and video.", "https://www.worldlabs.ai/_next/image?url=%2Fimages%2Fworld-api.jpg&w=3840&q=75"),
+        ("World Labs Announces New Funding", "https://www.worldlabs.ai/blog/funding-2026", datetime(2026, 2, 18), "An update on our vision for spatial intelligence in 2026.", "https://www.worldlabs.ai/_next/image?url=%2Fimages%2Ffunding.jpg&w=3840&q=75"),
         ("Marble: A Multimodal World Model", "https://www.worldlabs.ai/blog/marble-world-model", datetime(2025, 11, 12), "Marble, our frontier multimodal world model, is now available to everyone.", "https://www.worldlabs.ai/_next/image?url=%2Fimages%2Fnov12-thumbnail.jpg&w=3840&q=75"),
         ("From Words to Worlds: Spatial Intelligence", "https://www.worldlabs.ai/blog/spatial-intelligence", datetime(2025, 11, 10), "A manifesto on spatial intelligence - AI's next frontier and how world models will unlock it.", "https://www.worldlabs.ai/_next/image?url=%2Fimages%2FManifesto-Magritte.jpg&w=3840&q=75"),
         ("RTFM: A Real-Time Frame Model", "https://www.worldlabs.ai/blog/rtfm", datetime(2025, 10, 16), "A research preview of RTFM - a generative world model that generates video in real-time.", "https://www.worldlabs.ai/_next/image?url=%2Fimages%2Frtfm-thumbnail-glass.png&w=3840&q=75"),
         ("Generating Bigger and Better Worlds", "https://www.worldlabs.ai/blog/bigger-better-worlds", datetime(2025, 9, 16), "Latest breakthrough in 3D world generation with larger, more detailed environments.", "https://www.worldlabs.ai/_next/image?url=%2Fimages%2Fbigger-better-worlds-nologo.jpg&w=3840&q=75"),
         ("Generating Worlds", "https://www.worldlabs.ai/blog/generating-worlds", datetime(2024, 12, 2), "Early progress toward persistent, navigable 3D worlds you can explore in your browser.", "https://www.worldlabs.ai/_next/image?url=%2Fimages%2Fgenerating-worlds-nologo.jpg&w=3840&q=75"),
-        ("World Labs Announces New Funding", "https://www.worldlabs.ai/blog/funding-2026", datetime(2026, 2, 18), "An update on our vision for spatial intelligence in 2026.", "https://www.worldlabs.ai/_next/image?url=%2Fimages%2Ffunding.jpg&w=3840&q=75"),
     ],
     "Skild AI": [
         ("Skild AI Expands Global Footprint To Bengaluru", "https://www.skild.ai/blogs/bengaluru", datetime(2026, 2, 19), "Skild AI announces expansion to Bengaluru, India.", "https://www.skild.ai/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fbengaluru.468e7705.jpg&w=3840&q=75"),
@@ -147,8 +148,28 @@ FALLBACK_DATA = {
         ("NEO: The Next Generation Android", "https://www.1x.tech/discover/neo", datetime(2025, 8, 15), "Unveiling NEO, an advanced android designed for domestic assistance.", None),
         ("1X Technologies Raises $100M Series B", "https://www.1x.tech/discover/series-b", datetime(2025, 6, 10), "1X Technologies announces $100M Series B funding to scale humanoid robot production.", None),
     ],
-    "Agility Robotics": [],
-    "Figure": [],
+    "Agility Robotics": [
+        ("Agility Gets a New Brand", "https://www.agilityrobotics.com/content/agility-gets-a-new-brand", datetime(2026, 3, 5), "Agility introduces its new brand identity.", "https://cdn.prod.website-files.com/68d6ca150ffa11fdc25d7575/69a98ff7fbf259b6de4ab977_Brand-Lauch_01%201.png"),
+        ("2026: The Automation Evolution", "https://www.agilityrobotics.com/content/the-automation-evolution", datetime(2026, 1, 16), "Looking ahead to automation in 2026.", "https://cdn.prod.website-files.com/6980c63561bbbeb67b4b7ab5/698e3708677145336d500dcf_698e0485a8fa146cce743168_696aac3fc0fa3b57a66bbc7d_predictions-report-thumb.jpeg"),
+        ("Beyond the Hype", "https://www.agilityrobotics.com/content/beyond-the-hype", datetime(2025, 11, 24), "Analysis of the humanoid robotics industry.", "https://cdn.prod.website-files.com/6980c63561bbbeb67b4b7ab5/698e3706aabc1d14b77ed872_698e0487f75bb3ecfc2e9050_69248f0bea797f53c19379e5_nrtl-final-thumb.jpeg"),
+        ("Digit Moves Over 100,000 Totes in Commercial Deployment", "https://www.agilityrobotics.com/content/digit-moves-over-100k-totes", datetime(2025, 11, 20), "Digit achieves major milestone in commercial deployment.", "https://cdn.prod.website-files.com/6980c63561bbbeb67b4b7ab5/698e37060199c79ac58bbdb2_698e04859bba4e06e05cdb32_691e634fc31c30f89d18f476_GXO-Milestone-Square.jpeg"),
+        ("Humanoid Robots: The Key to America's Automated Homecoming", "https://www.agilityrobotics.com/content/humanoid-robots-the-key-to-americas-automated-homecoming", datetime(2025, 10, 28), "The role of humanoid robots in American manufacturing.", "https://cdn.prod.website-files.com/6980c63561bbbeb67b4b7ab5/698e37078a703f83b00af39b_698e04887cd6858023f68a94_690011e638f31c1a70686c00_manufacturing-thumb.jpeg"),
+        ("The Top Takeaways from the Conference on Robot Learning", "https://www.agilityrobotics.com/content/the-top-takeaways-from-the-conference-on-robot-learning", datetime(2025, 10, 14), "Key insights from CoRL 2025.", "https://cdn.prod.website-files.com/6980c63561bbbeb67b4b7ab5/698e3706721634c4dfc92261_698e0485612e413c0fcbae67_68eedb1e335a0c71442880b6_CoRL-Thumb.jpeg"),
+        ("Digit's Next Steps", "https://www.agilityrobotics.com/content/digits-next-steps", datetime(2025, 10, 2), "What's next for Digit.", "https://cdn.prod.website-files.com/6980c63561bbbeb67b4b7ab5/698e3705dd8e5fdc8073c949_698e0485531c1eaf15826687_68ca0136093d1592df9bf968_nav-thumb.jpeg"),
+        ("Agility Robotics Powers the Future of Robotics with NVIDIA", "https://www.agilityrobotics.com/content/agility-robotics-powers-the-future-of-robotics-with-nvidia", datetime(2025, 9, 10), "Partnership with NVIDIA to advance robotics.", "https://cdn.prod.website-files.com/6980c63561bbbeb67b4b7ab5/698e3705b2006b64c48a0716_698e0485f06f42cc8a66f7e9_68c1b757ca00040b76b1e3ab_jensen-digit-square.jpeg"),
+    ],
+    "Figure": [
+        ("Helix 02 Living Room Tidy", "https://www.figure.ai/news/helix-02-living-room-tidy", datetime(2026, 3, 9), "Helix 02 demonstrates tidying up a living room.", None),
+        ("Introducing Helix 02: Full-Body Autonomy", "https://www.figure.ai/news/helix-02", datetime(2026, 1, 27), "Introducing Helix 02 with full-body autonomy capabilities.", None),
+        ("Introducing Figure 03", "https://www.figure.ai/news/introducing-figure-03", datetime(2025, 10, 9), "Meet Figure 03, the next generation humanoid robot.", None),
+        ("Scaling Helix: a New State of the Art in Humanoid Logistics", "https://www.figure.ai/news/scaling-helix-logistics", datetime(2025, 6, 7), "Helix sets new standards in humanoid logistics.", None),
+        ("F.02 Contributed to the Production of 30,000 Cars at BMW", "https://www.figure.ai/news/production-at-bmw", datetime(2025, 11, 19), "Figure's F.02 robots contribute to BMW car production.", None),
+        ("Project Go-Big: Internet-Scale Humanoid Pretraining and Direct Human-to-Robot Transfer", "https://www.figure.ai/news/project-go-big", datetime(2025, 9, 18), "New research on internet-scale humanoid pretraining.", None),
+        ("Figure Announces Strategic Partnership with Brookfield", "https://www.figure.ai/news/figure-announces-strategic-partnership-with-brookfield", datetime(2025, 9, 17), "Figure announces partnership with Brookfield.", None),
+        ("Figure Exceeds $1B in Series C Funding at $39B Post-Money Valuation", "https://www.figure.ai/news/series-c", datetime(2025, 9, 16), "Figure raises $1B in Series C funding.", None),
+        ("Helix Loads the Dishwasher", "https://www.figure.ai/news/helix-loads-the-dishwasher", datetime(2025, 9, 3), "Helix demonstrates loading the dishwasher.", None),
+        ("Helix Learns to Fold Laundry", "https://www.figure.ai/news/helix-learns-to-fold-laundry", datetime(2025, 8, 12), "Helix learns to fold laundry through AI.", None),
+    ],
 }
 
 

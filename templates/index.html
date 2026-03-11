@@ -510,20 +510,6 @@
                         </div>
                         {% endfor %}
                     </div>
-                        {% for post in company_posts %}
-                        <div class="company-post">
-                            <div class="company-post-date">{{ post.date.strftime('%b %d, %Y') }}</div>
-                            <div class="company-post-content">
-                                <div class="company-post-title">
-                                    <a href="{{ post.url }}" target="_blank" rel="noopener">{{ post.title }}</a>
-                                </div>
-                                {% if post.summary %}
-                                <div class="company-post-summary">{{ post.summary }}</div>
-                                {% endif %}
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
                 </div>
                 {% endfor %}
             </div>

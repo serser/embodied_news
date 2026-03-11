@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """
-Embodied AI News Aggregator - With Images
+Embodied AI News Aggregator - Fallback Data Only
 """
 
 from flask import Flask, render_template, jsonify
-import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-import re
 import hashlib
 import base64
 
 app = Flask(__name__)
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
 
 BLOG_SOURCES = [
     {"name": "Generalist AI", "url": "https://generalistai.com/blog/", "base_url": "https://generalistai.com", "color": "#6366f1"},
@@ -23,19 +22,74 @@ BLOG_SOURCES = [
     {"name": "Sunday Robotics", "url": "https://www.sunday.ai/journal", "base_url": "https://www.sunday.ai", "color": "#f59e0b"},
     {"name": "Skild AI", "url": "https://www.skild.ai/blogs", "base_url": "https://www.skild.ai", "color": "#ef4444"},
     {"name": "NVIDIA GEAR", "url": "https://research.nvidia.com/labs/gear/", "base_url": "https://research.nvidia.com", "color": "#76b900"},
-    {"name": "1X Technologies", "url": "https://www.1x.tech/discover", "base_url": "https://www.1x.tech", "color": "#000000"}
+    {"name": "1X Technologies", "url": "https://www.1x.tech/discover", "base_url": "https://www.1x.tech", "color": "#000000"},
+    {"name": "Agility Robotics", "url": "https://www.agilityrobotics.com/resources", "base_url": "https://www.agilityrobotics.com", "color": "#ff6b35"}
 ]
 
-COMPANY_COLORS = {
-    "Generalist AI": "#6366f1",
-    "Physical Intelligence": "#8b5cf6",
-    "World Labs": "#ec4899",
-    "Figure": "#14b8a6",
-    "Sunday Robotics": "#f59e0b",
-    "Skild AI": "#ef4444",
-    "NVIDIA GEAR": "#76b900",
-    "1X Technologies": "#000000"
-}
+COMPANY_COLORS = {s["name"]: s["color"] for s in BLOG_SOURCES}
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def generate_placeholder_svg(title, company):
+    """Generate an artistic placeholder SVG image based on title hash."""
+    hash_obj = hashlib.md5(title.encode())
+    hash_int = int(hash_obj.hexdigest()[:8], 16)
+    
+    h1 = (hash_int % 360)
+    hue2 = (h1 + 30) % 360
+    
+    def hsl_to_hex(h, s=70, l=50):
+        h = h / 360
+        if s == 0:
+            return f'#{l:02x}{l:02x}{l:02x}'
+        q = l * (1 + s/100) / 100 if l < 50 else l + s - l * s / 100
+        p = 2 * l - q
+        
+        def hue_to_rgb(p, q, t):
+            t = t % 1
+            if t < 1/6: return p + (q - p) * 6 * t
+            if t < 1/2: return q
+            if t < 2/3: return p + (q - p) * (2/3 - t) * 6
+            return p
+        
+        r = int(hue_to_rgb(p, q, h + 1/3) * 255)
+        g = int(hue_to_rgb(p, q, h) * 255)
+        b = int(hue_to_rgb(p, q, h - 1/3) * 255)
+        return f'#{r:02x}{g:02x}{b:02x}'
+    
+    color1 = hsl_to_hex(h1, 60, 45)
+    color2 = hsl_to_hex(hue2, 70, 35)
+    title_short = title[:35] + "..." if len(title) > 35 else title
+    
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">
+      <defs>
+        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:{color1};stop-opacity:1" />
+          <stop offset="100%" style="stop-color:{color2};stop-opacity:1" />
+        </linearGradient>
+      </defs>
+      <rect width="600" height="400" fill="url(#grad)"/>
+      <circle cx="{100 + (hash_int % 200)}" cy="{80 + (hash_int % 100)}" r="{50 + (hash_int % 100)}" fill="{color2}" opacity="0.3"/>
+      <circle cx="{300 + (hash_int % 150)}" cy="{200 + (hash_int % 80)}" r="{80 + (hash_int % 60)}" fill="{color1}" opacity="0.2"/>
+      <text x="300" y="220" font-family="Arial, sans-serif" font-size="22" fill="white" text-anchor="middle">{title_short}</text>
+      <text x="300" y="255" font-family="Arial, sans-serif" font-size="14" fill="white" text-anchor="middle" opacity="0.7">{company}</text>
+    </svg>'''
+    
+    svg_b64 = base64.b64encode(svg.encode('utf-8')).decode('utf-8')
+    return f"data:image/svg+xml;base64,{svg_b64}"
+
+
+def has_real_image(post):
+    """Check if post has a real image (not a placeholder SVG)."""
+    image = post.get("image", "")
+    return image and not image.startswith("data:image/svg")
+
+
+# =============================================================================
+# FALLBACK DATA - Current as of March 2026
+# =============================================================================
 
 FALLBACK_DATA = {
     "Generalist AI": [
@@ -67,6 +121,7 @@ FALLBACK_DATA = {
         ("No Priors Episode | Conviction", "https://www.youtube.com/watch?v=4-VzXoZqAH0", datetime(2025, 11, 19), "Sunday Robotics on the No Priors podcast.", None),
     ],
     "Physical Intelligence": [
+        ("VLAs with Long and Short-Term Memory", "https://www.pi.website/research/memory", datetime(2026, 3, 3), "Multi-Scale Embodied Memory (MEM) gives our models both long-term and short-term memory, enabling complex tasks longer than ten minutes.", None),
         ("The Physical Intelligence Layer", "https://www.pi.website/blog/partner", datetime(2026, 2, 24), "General-purpose physical intelligence models will enable a Cambrian explosion of robotics applications.", None),
         ("Moravec's Paradox and the Robot Olympics", "https://www.pi.website/blog/olympics", datetime(2025, 12, 22), "Fine-tuning models on difficult manipulation challenge tasks.", None),
         ("Emergence of Human to Robot Transfer in VLAs", "https://www.pi.website/research/human_to_robot", datetime(2025, 12, 16), "Exploring how transfer from human videos to robotic tasks emerges in VLAs as they scale.", None),
@@ -83,7 +138,7 @@ FALLBACK_DATA = {
         ("Project GR00T: Foundation Model for Humanoid Robots", "https://developer.nvidia.com/project-gr00t", datetime(2024, 3, 18), "NVIDIA's foundation model for building general-purpose humanoid robots.", None),
         ("Eureka: Human-Level Reward Design via Coding LLMs", "https://eureka-research.github.io/", datetime(2023, 10, 15), "NVIDIA's AI agent that writes reward code for robot training.", None),
         ("Voyager: Open-Ended Embodied Agent with LLMs", "https://voyager.minedojo.org/", datetime(2023, 5, 15), "An open-ended embodied agent that uses LLMs for lifelong learning in Minecraft.", None),
-        ("MimicPlay: Long-Horizon Imitation Learning", "https://mimic-play.github.io/", datetime(2023, 3, 20), "Learning long-horizon manipulation tasks from human videos.", None),
+        ("MimicPlay: Long-Horizon Imitation Learning", "https://mimic-play.github.io/", datetime(2023, 3, 20), "Learning long-horizon imitation learning from human videos.", None),
         ("VIMA: Robot Manipulation with Multimodal Prompts", "https://vimalabs.github.io/", datetime(2023, 2, 10), "Generalist robot manipulation with multimodal prompt understanding.", None),
         ("MineDojo: Open-Ended Embodied Agents", "https://minedojo.org/", datetime(2022, 10, 20), "Building open-ended embodied agents in Minecraft using internet knowledge.", None),
     ],
@@ -92,177 +147,85 @@ FALLBACK_DATA = {
         ("NEO: The Next Generation Android", "https://www.1x.tech/discover/neo", datetime(2025, 8, 15), "Unveiling NEO, an advanced android designed for domestic assistance.", None),
         ("1X Technologies Raises $100M Series B", "https://www.1x.tech/discover/series-b", datetime(2025, 6, 10), "1X Technologies announces $100M Series B funding to scale humanoid robot production.", None),
     ],
+    "Agility Robotics": [],
+    "Figure": [],
 }
-
-cache_lock = threading.RLock()
-cached_posts = []
-cache_timestamp = None
-CACHE_DURATION = 300
-
-
-def generate_placeholder_image(title, company):
-    """Generate an artistic placeholder SVG image based on title hash."""
-    hash_obj = hashlib.md5(title.encode())
-    hash_int = int(hash_obj.hexdigest()[:8], 16)
-    
-    primary = COMPANY_COLORS.get(company, "#6366f1")
-    h1 = (hash_int % 360)
-    hue2 = (h1 + 30) % 360
-    
-    def hsl_to_hex(h, s=70, l=50):
-        h = h / 360
-        if s == 0:
-            return f'#{l:02x}{l:02x}{l:02x}'
-        q = l * (1 + s/100) / 100 if l < 50 else l + s - l * s / 100
-        p = 2 * l - q
-        def hue_to_rgb(p, q, t):
-            t = t % 1
-            if t < 1/6: return p + (q - p) * 6 * t
-            if t < 1/2: return q
-            if t < 2/3: return p + (q - p) * (2/3 - t) * 6
-            return p
-        r = int(hue_to_rgb(p, q, h + 1/3) * 255)
-        g = int(hue_to_rgb(p, q, h) * 255)
-        b = int(hue_to_rgb(p, q, h - 1/3) * 255)
-        return f'#{r:02x}{g:02x}{b:02x}'
-    
-    color1 = hsl_to_hex(h1, 60, 45)
-    color2 = hsl_to_hex(hue2, 70, 35)
-    title_short = title[:35] + "..." if len(title) > 35 else title
-    
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">
-      <defs>
-        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style="stop-color:{color1};stop-opacity:1" />
-          <stop offset="100%" style="stop-color:{color2};stop-opacity:1" />
-        </linearGradient>
-      </defs>
-      <rect width="600" height="400" fill="url(#grad)"/>
-      <circle cx="{100 + (hash_int % 200)}" cy="{80 + (hash_int % 100)}" r="{50 + (hash_int % 100)}" fill="{color2}" opacity="0.3"/>
-      <circle cx="{300 + (hash_int % 150)}" cy="{200 + (hash_int % 80)}" r="{80 + (hash_int % 60)}" fill="{color1}" opacity="0.2"/>
-      <text x="300" y="220" font-family="Arial, sans-serif" font-size="22" fill="white" text-anchor="middle">{title_short}</text>
-      <text x="300" y="255" font-family="Arial, sans-serif" font-size="14" fill="white" text-anchor="middle" opacity="0.7">{company}</text>
-    </svg>'''
-    
-    svg_b64 = base64.b64encode(svg.encode('utf-8')).decode('utf-8')
-    return f"data:image/svg+xml;base64,{svg_b64}"
-
-
-def fetch_figure(soup, base_url):
-    """Parse Figure blog posts."""
-    posts = []
-    for link in soup.find_all('a', href=True):
-        href = link.get('href', '')
-        if not href.startswith('/news/'):
-            continue
-        parent = link.find_parent(['div', 'li', 'article'])
-        if not parent:
-            continue
-        title_elem = parent.find(['h1', 'h2', 'h3', 'h4'])
-        title = title_elem.get_text(strip=True) if title_elem else link.get_text(strip=True)
-        
-        summary = ""
-        desc_elem = parent.find('p')
-        if desc_elem:
-            summary = desc_elem.get_text(strip=True)[:200]
-        
-        image_url = None
-        img_elem = parent.find('img', src=True)
-        if img_elem:
-            image_url = img_elem.get('src')
-        
-        date_elem = parent.find(string=lambda t: t and any(m in t for m in ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']))
-        if date_elem:
-            try:
-                date = datetime.strptime(date_elem.strip(), '%B %d, %Y')
-                if date and title and len(title) > 3:
-                    full_url = href if href.startswith('http') else f"{base_url}{href}"
-                    posts.append({"title": title, "url": full_url, "date": date, "summary": summary, "image": image_url, "company": "Figure"})
-            except:
-                pass
-    return posts
-
-
-def fetch_blog_posts(source):
-    """Fetch and parse blog posts from a single source."""
-    company = source["name"]
-    
-    if company in FALLBACK_DATA:
-        posts = []
-        for item in FALLBACK_DATA[company]:
-            title, url, date, summary, image = item[:5]
-            if image is None:
-                image = generate_placeholder_image(title, company)
-            posts.append({"title": title, "url": url, "date": date, "summary": summary, "image": image, "company": company})
-        return posts
-    
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(source["url"], headers=headers, timeout=15)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        if company == "Figure":
-            return fetch_figure(soup, source["base_url"])
-    except Exception as e:
-        print(f"Error fetching {company}: {e}")
-    
-    return []
 
 
 def get_all_posts():
-    global cached_posts, cache_timestamp
+    """Get all posts from fallback data with placeholder SVGs for posts without images."""
+    posts = []
+    for company, items in FALLBACK_DATA.items():
+        for item in items:
+            title, url, date, summary, image = item[:5]
+            if image is None:
+                image = generate_placeholder_svg(title, company)
+            posts.append({
+                "title": title,
+                "url": url,
+                "date": date,
+                "summary": summary,
+                "image": image,
+                "company": company
+            })
     
-    with cache_lock:
-        now = datetime.now()
-        if cache_timestamp and cached_posts and (now - cache_timestamp).seconds < CACHE_DURATION:
-            return cached_posts
-    
-    all_posts = []
-    
-    with ThreadPoolExecutor(max_workers=7) as executor:
-        futures = {executor.submit(fetch_blog_posts, source): source for source in BLOG_SOURCES}
-        for future in as_completed(futures):
-            source = futures[future]
-            try:
-                posts = future.result()
-                all_posts.extend(posts)
-                print(f"Fetched {len(posts)} posts from {source['name']}")
-            except Exception as e:
-                print(f"Error fetching {source['name']}: {e}")
-    
-    all_posts.sort(key=lambda x: x["date"], reverse=True)
-    
-    seen = set()
-    unique_posts = []
-    for post in all_posts:
-        key = (post["title"].strip().lower(), post["company"])
-        if key not in seen:
-            seen.add(key)
-            unique_posts.append(post)
-    
-    with cache_lock:
-        cached_posts = unique_posts
-        cache_timestamp = datetime.now()
-    
-    return unique_posts
+    # Sort by date descending
+    posts.sort(key=lambda x: x["date"], reverse=True)
+    return posts
 
 
-@app.route('/')
-def index():
+def get_by_company_dedup():
+    """Get posts organized by company, removing duplicates preferring real images."""
     posts = get_all_posts()
+    
     by_company = {}
     for post in posts:
         company = post["company"]
         if company not in by_company:
             by_company[company] = []
         by_company[company].append(post)
+    
+    # Deduplicate within each company - use URL as unique key
+    by_company_dedup = {}
+    for company, company_posts in by_company.items():
+        seen = {}
+        for post in company_posts:
+            url_key = post["url"].strip().lower()
+            has_img = post.get("image") is not None
+            
+            if url_key not in seen:
+                seen[url_key] = post
+            else:
+                # If current has image and existing doesn't, replace
+                existing_has_img = seen[url_key].get("image") is not None
+                if has_img and not existing_has_img:
+                    seen[url_key] = post
+        
+        # Filter out posts without images
+        by_company_dedup[company] = [p for p in seen.values() if p.get("image") is not None]
+    
+    return by_company_dedup
+
+@app.route('/')
+def index():
+    """Main route - shows all posts."""
+    posts = get_all_posts()
+    by_company = get_by_company_dedup()
+    
     company_colors = {s["name"]: s["color"] for s in BLOG_SOURCES}
-    return render_template('index.html', posts=posts, by_company=by_company, company_colors=company_colors, companies=BLOG_SOURCES)
+    
+    return render_template(
+        'index.html',
+        posts=posts,
+        by_company=by_company,
+        company_colors=company_colors,
+        companies=BLOG_SOURCES
+    )
 
 
 @app.route('/api/posts')
 def api_posts():
+    """API endpoint for posts."""
     posts = get_all_posts()
     return jsonify([{
         "title": p["title"],
@@ -274,14 +237,9 @@ def api_posts():
     } for p in posts])
 
 
-@app.route('/refresh')
-def refresh():
-    global cache_timestamp
-    with cache_lock:
-        cache_timestamp = None
-    posts = get_all_posts()
-    return jsonify({"status": "ok", "posts_count": len(posts)})
-
+# =============================================================================
+# STARTUP
+# =============================================================================
 
 if __name__ == '__main__':
     print("Starting Embodied AI News Aggregator...")

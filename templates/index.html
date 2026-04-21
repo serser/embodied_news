@@ -68,6 +68,7 @@
             display: flex;
             gap: 0.5rem;
             flex-wrap: wrap;
+            align-items: center;
         }
         
         .nav-btn {
@@ -90,6 +91,28 @@
             background: #6366f1;
             border-color: #6366f1;
             color: white;
+        }
+
+        .refresh-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+            margin-left: 0.5rem;
+        }
+
+        .refresh-btn:hover {
+            border-color: #6366f1;
+            color: var(--text-primary);
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
         
         /* Main Content */
@@ -198,19 +221,6 @@
         }
         
         .post-company {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 1.5rem;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        
-        .post-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 30px rgba(99, 102, 241, 0.15);
-        }
-        
-        .post-company {
             display: inline-block;
             padding: 0.25rem 0.75rem;
             border-radius: 20px;
@@ -315,15 +325,23 @@
             border-bottom: none;
         }
         
+        .company-post-image {
+            width: 80px;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 6px;
+            flex-shrink: 0;
+        }
+        
+        .company-post-main {
+            flex: 1;
+            min-width: 0;
+        }
+        
         .company-post-date {
             font-size: 0.8rem;
             color: var(--text-secondary);
-            min-width: 100px;
-            padding-top: 0.25rem;
-        }
-        
-        .company-post-content {
-            flex: 1;
+            margin-bottom: 0.25rem;
         }
         
         .company-post-title {
@@ -346,31 +364,6 @@
             line-height: 1.4;
         }
         
-        .company-post-image {
-            width: 80px;
-            height: 60px;
-            object-fit: cover;
-            border-radius: 6px;
-            flex-shrink: 0;
-        }
-        
-        .company-post-main {
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .company-post {
-            display: flex;
-            gap: 1rem;
-            align-items: flex-start;
-        }
-        
-        /* Footer */
-            color: var(--text-secondary);
-            font-size: 0.85rem;
-            line-height: 1.4;
-        }
-        
         /* Footer */
         footer {
             text-align: center;
@@ -379,6 +372,15 @@
             font-size: 0.85rem;
             border-top: 1px solid var(--border-color);
             margin-top: 3rem;
+        }
+
+        footer a {
+            color: #6366f1;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
         }
         
         /* Responsive */
@@ -415,8 +417,9 @@
                 <div class="tagline">Tracking the latest from robotics & AI companies</div>
             </div>
             <nav>
-                <button class="nav-btn active" onclick="showView('timeline')">Timeline</button>
-                <button class="nav-btn" onclick="showView('company')">By Company</button>
+                <button class="nav-btn active" onclick="showView('timeline', this)">Timeline</button>
+                <button class="nav-btn" onclick="showView('company', this)">By Company</button>
+                <button class="refresh-btn" id="refresh-btn" onclick="refreshData()">Refresh</button>
             </nav>
         </div>
     </header>
@@ -452,30 +455,9 @@
                             <p class="post-summary">{{ post.summary }}</p>
                             {% endif %}
                             <a href="{{ post.url }}" target="_blank" rel="noopener" class="post-link">
-                                Read more →
+                                Read more &rarr;
                             </a>
                         </div>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </section>
-        <section id="timeline-view" class="view-section active">
-            <div class="timeline">
-                {% for post in posts %}
-                <div class="timeline-item">
-                    <div class="timeline-date">{{ post.date.strftime('%B %d, %Y') }}</div>
-                    <div class="post-card">
-                        <span class="post-company" style="background: {{ company_colors[post.company] }}20; color: {{ company_colors[post.company] }}">{{ post.company }}</span>
-                        <h3 class="post-title">
-                            <a href="{{ post.url }}" target="_blank" rel="noopener">{{ post.title }}</a>
-                        </h3>
-                        {% if post.summary %}
-                        <p class="post-summary">{{ post.summary }}</p>
-                        {% endif %}
-                        <a href="{{ post.url }}" target="_blank" rel="noopener" class="post-link">
-                            Read more →
-                        </a>
                     </div>
                 </div>
                 {% endfor %}
@@ -517,14 +499,14 @@
     </main>
     
     <footer>
-        <p>Data fetched from: Generalist AI, Physical Intelligence, World Labs, Figure, Sunday Robotics, Skild AI</p>
-        <p>Auto-refreshes every 5 minutes • <a href="/refresh" style="color: #6366f1;">Force Refresh</a></p>
+        <p>Data fetched from: {% for source in companies %}{{ source.name }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+        <p>Auto-refreshes every 5 minutes &bull; <a href="#" onclick="refreshData(); return false;">Force Refresh</a></p>
     </footer>
     
     <script>
-        function showView(view) {
-            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
+        function showView(view, btn) {
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
             document.querySelectorAll('.view-section').forEach(section => section.classList.remove('active'));
             
             if (view === 'timeline') {
@@ -535,11 +517,34 @@
             
             localStorage.setItem('preferredView', view);
         }
+
+        function refreshData() {
+            const btn = document.getElementById('refresh-btn');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Refreshing...';
+
+            fetch('/refresh')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.posts_count > 0) {
+                        location.reload();
+                    } else {
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                    }
+                })
+                .catch(err => {
+                    console.error('Refresh failed:', err);
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                });
+        }
         
         // Restore view preference
         const savedView = localStorage.getItem('preferredView');
         if (savedView === 'company') {
-            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.view-section').forEach(section => section.classList.remove('active'));
             document.querySelector('.nav-btn:nth-child(2)').classList.add('active');
             document.getElementById('company-view').classList.add('active');
@@ -554,7 +559,7 @@
                         location.reload();
                     }
                 })
-                .catch(err => console.log('Auto-refresh failed:', err));
+                .catch(err => console.log('Auto-refresh skipped:', err));
         }, 300000);
     </script>
 </body>

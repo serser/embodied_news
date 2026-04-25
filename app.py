@@ -48,9 +48,12 @@ BLOG_SOURCES = [
     {"name": "Figure", "url": "https://www.figure.ai/news", "base_url": "https://www.figure.ai", "color": "#14b8a6"},
     {"name": "Sunday Robotics", "url": "https://www.sunday.ai/journal", "base_url": "https://www.sunday.ai", "color": "#f59e0b"},
     {"name": "Skild AI", "url": "https://www.skild.ai/blogs", "base_url": "https://www.skild.ai", "color": "#ef4444"},
-    {"name": "NVIDIA GEAR", "url": "https://research.nvidia.com/labs/gear/", "base_url": "https://research.nvidia.com", "color": "#76b900"},
     {"name": "1X Technologies", "url": "https://www.1x.tech/discover", "base_url": "https://www.1x.tech", "color": "#000000"},
     {"name": "Agility Robotics", "url": "https://www.agilityrobotics.com/resources", "base_url": "https://www.agilityrobotics.com", "color": "#ff6b35"},
+    {"name": "Sharpa", "url": "https://www.sharpa.com/blogs/research", "base_url": "https://www.sharpa.com", "color": "#00c853"},
+    {"name": "Hexagon Robotics", "url": "https://robotics.hexagon.com/news/", "base_url": "https://robotics.hexagon.com", "color": "#0078d4"},
+    {"name": "MANUS", "url": "https://www.manus-meta.com/blog", "base_url": "https://www.manus-meta.com", "color": "#1a1a1a"},
+    {"name": "BeingBeyond", "url": "https://research.beingbeyond.com/", "base_url": "https://research.beingbeyond.com", "color": "#5b21b6"},
 ]
 
 COMPANY_COLORS = {s["name"]: s["color"] for s in BLOG_SOURCES}
@@ -602,104 +605,6 @@ def _extract_nextjs_image(img_tag, base_url):
     return None
 
 
-def scrape_nvidia_gear(source):
-    """
-    NVIDIA GEAR lab page lists research projects.
-    The publications are client-rendered, but the main page lists projects
-    with links that we can extract. We scrape the project listing from the
-    SSR HTML on the lab homepage.
-    """
-    company = source["name"]
-    base_url = source["base_url"]
-    response = make_request(source["url"])
-    soup = BeautifulSoup(response.content, 'html.parser')
-
-    posts = []
-
-    # Try __NEXT_DATA__ first (static export)
-    next_data_script = soup.find('script', id='__NEXT_DATA__')
-    if next_data_script:
-        try:
-            next_data = json.loads(next_data_script.string)
-            # Navigate to projects in the page props
-            page_props = next_data.get('props', {}).get('pageProps', {})
-
-            # Look for project data in all nested structures
-            def find_projects(obj, depth=0):
-                """Recursively search for project-like structures."""
-                results = []
-                if depth > 10:
-                    return results
-                if isinstance(obj, dict):
-                    # Check if this dict looks like a project
-                    if 'title' in obj and ('link' in obj or 'url' in obj or 'projectLink' in obj):
-                        results.append(obj)
-                    for v in obj.values():
-                        results.extend(find_projects(v, depth + 1))
-                elif isinstance(obj, list):
-                    for item in obj:
-                        results.extend(find_projects(item, depth + 1))
-                return results
-
-            projects = find_projects(next_data)
-            for proj in projects:
-                title = proj.get('title', '').strip()
-                if not title or len(title) < 3:
-                    continue
-                url = proj.get('projectLink') or proj.get('link') or proj.get('url', '')
-                if not url:
-                    continue
-
-                posts.append({
-                    "title": title,
-                    "url": url,
-                    "date": datetime.min,
-                    "summary": proj.get('description', '') or proj.get('conference', ''),
-                    "image": None,
-                    "company": company,
-                })
-
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning(f"[NVIDIA GEAR] Failed to parse __NEXT_DATA__: {e}")
-
-    # HTML fallback: scrape project links from the page
-    if not posts:
-        for a_tag in soup.find_all('a', href=True):
-            href = a_tag.get('href', '')
-            # Look for project links (external research pages, arxiv, github pages)
-            if not any(domain in href for domain in ['github.io', 'arxiv.org', 'developer.nvidia.com', 'nvidia.com/labs/gear']):
-                continue
-
-            text = a_tag.get_text(strip=True)
-            if not text or len(text) < 3 or len(text) > 200:
-                continue
-
-            # Skip navigation/footer links
-            parent = a_tag.find_parent(['nav', 'footer', 'header'])
-            if parent:
-                continue
-
-            posts.append({
-                "title": text,
-                "url": href,
-                "date": datetime.min,
-                "summary": "",
-                "image": None,
-                "company": company,
-            })
-
-    # Deduplicate by URL
-    seen = set()
-    unique = []
-    for p in posts:
-        if p["url"] not in seen:
-            seen.add(p["url"])
-            unique.append(p)
-    posts = unique
-
-    logger.info(f"[NVIDIA GEAR] Scraped {len(posts)} projects/publications")
-    return posts
-
 
 def scrape_1x_technologies(source):
     """
@@ -868,6 +773,294 @@ def scrape_agility_robotics(source):
     return posts
 
 
+def scrape_sharpa(source):
+    """
+    Sharpa uses a Shopify-based blog with custom web components.
+    Blog posts are in <article class="sa-research-article__card"> elements.
+    Titles in a.sa-research-article__card-title, dates in div.sa-research-article__card-date.
+    Excerpt available via data-excerpt attribute on the article element.
+    No featured images on the listing page.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    for article in soup.find_all('article', class_='sa-research-article__card'):
+        # Title and URL from the title link
+        title_link = article.find('a', class_='sa-research-article__card-title')
+        if not title_link:
+            # Fallback to data-title attribute
+            title = article.get('data-title', '').strip()
+            if not title:
+                continue
+        else:
+            title = title_link.get_text(strip=True)
+
+        # URL
+        href = title_link.get('href', '') if title_link else ''
+        if not href:
+            continue
+        if href.startswith('/'):
+            url = f"{base_url}{href}"
+        else:
+            url = href
+
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # Date from div.sa-research-article__card-date (format: "09 Mar 2026")
+        date = None
+        date_el = article.find('div', class_='sa-research-article__card-date')
+        if date_el:
+            date_text = date_el.get_text(strip=True)
+            date = safe_parse_date(date_text, ['%d %b %Y'])
+
+        # Summary from data-excerpt attribute
+        summary = article.get('data-excerpt', '').strip()
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": None,  # No featured images on listing page
+            "company": company,
+        })
+
+    logger.info(f"[Sharpa] Scraped {len(posts)} posts")
+    return posts
+
+
+def scrape_hexagon_robotics(source):
+    """
+    Hexagon Robotics uses WordPress + Elementor with a loop grid.
+    Each post card is an elementor loop-item div containing:
+    - Date in h6 heading (format: "April 22, 2026")
+    - Title in h3 heading with a link
+    - Image in img tag inside elementor-widget-image
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    # Each post is inside an e-loop-item div
+    for item in soup.find_all('div', class_='e-loop-item'):
+        # Title and URL from h3 > a
+        h3 = item.find('h3', class_='elementor-heading-title')
+        if not h3:
+            continue
+        link = h3.find('a')
+        if not link:
+            continue
+
+        title = link.get_text(strip=True)
+        if not title:
+            continue
+
+        href = link.get('href', '')
+        if not href:
+            continue
+        url = href if href.startswith('http') else f"{base_url}{href}"
+
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # Date from h6 heading (format: "April 22, 2026", "March 16, 2026")
+        date = None
+        h6 = item.find('h6', class_='elementor-heading-title')
+        if h6:
+            date_text = h6.get_text(strip=True)
+            date = safe_parse_date(date_text, ['%B %d, %Y', '%b %d, %Y'])
+
+        # Image
+        image_url = None
+        img_widget = item.find('div', class_='elementor-widget-image')
+        if img_widget:
+            img = img_widget.find('img')
+            if img:
+                src = img.get('src', '')
+                if src.startswith('http'):
+                    image_url = src
+                elif src.startswith('/'):
+                    image_url = f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": "",  # Hexagon listing page has no excerpts
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[Hexagon Robotics] Scraped {len(posts)} posts")
+    return posts
+
+
+def scrape_manus(source):
+    """
+    MANUS (manus-meta.com) uses Webflow CMS.
+    Blog posts are in link blocks (a tags) with image, title (h2), date text, and category.
+    Each post link follows pattern /blog/<slug>.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    # Find all links that point to /blog/ articles
+    for link in soup.find_all('a', href=True):
+        href = link.get('href', '')
+
+        # Only process links to blog posts (not navigation/footer links)
+        if not href.startswith('/blog/') or href == '/blog' or href == '/blog/':
+            continue
+
+        # Build full URL
+        url = f"{base_url}{href}"
+
+        if url in seen_urls:
+            continue
+
+        # Must contain a heading (h2) to be a blog card, not a nav link
+        h2 = link.find('h2')
+        if not h2:
+            continue
+
+        title = h2.get_text(strip=True)
+        if not title:
+            continue
+
+        seen_urls.add(url)
+
+        # Date - look for text that matches date patterns within the link block
+        date = None
+        # The date text appears as a separate element inside the card
+        for el in link.find_all(['div', 'p', 'span']):
+            text = el.get_text(strip=True)
+            # Try common date formats: "March 26, 2026"
+            parsed = safe_parse_date(text, ['%B %d, %Y', '%b %d, %Y'])
+            if parsed:
+                date = parsed
+                break
+
+        # Image
+        image_url = None
+        img = link.find('img')
+        if img:
+            src = img.get('src', '')
+            if src.startswith('http'):
+                image_url = src
+            elif src.startswith('//'):
+                image_url = f"https:{src}"
+            elif src.startswith('/'):
+                image_url = f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": "",
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[MANUS] Scraped {len(posts)} posts")
+    return posts
+
+
+def scrape_beingbeyond(source):
+    """
+    BeingBeyond uses Next.js with React Server Components (RSC).
+    The page is client-rendered but all research paper data is embedded
+    in the RSC payload within <script> tags as self.__next_f.push() calls.
+    Each item has: slug, title, tldr, thumbnail, dateLabel, venue, highlight.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    html = response.text
+
+    posts = []
+
+    # Extract the RSC payload containing the items array
+    # The data is in self.__next_f.push([1,"..."]) script blocks
+    # Look for the JSON array of items with slug, title, tldr, etc.
+    rsc_chunks = re.findall(r'self\.__next_f\.push\(\[1,"(.+?)"\]\)', html)
+
+    items = []
+    for chunk in rsc_chunks:
+        # Unescape the JSON string (it's double-escaped)
+        try:
+            unescaped = chunk.encode().decode('unicode_escape')
+        except (UnicodeDecodeError, ValueError):
+            continue
+
+        # Look for the items array pattern: "items":[{...}]
+        items_match = re.search(r'"items":\[(\{.*\})\]', unescaped)
+        if items_match:
+            try:
+                items_json = '[' + items_match.group(1) + ']'
+                items = json.loads(items_json)
+                break
+            except json.JSONDecodeError:
+                continue
+
+    for item in items:
+        slug = item.get("slug", "")
+        title = item.get("title", "").strip()
+        tldr = item.get("tldr", "").strip()
+        thumbnail = item.get("thumbnail", "")
+        date_label = item.get("dateLabel", "")
+        venue = item.get("venue")
+
+        if not title or not slug:
+            continue
+
+        url = f"{base_url}/{slug}"
+
+        # Parse date from dateLabel (format: "Apr 20, 2026")
+        date = safe_parse_date(date_label, ['%b %d, %Y'])
+
+        # Build image URL
+        image_url = None
+        if thumbnail:
+            if thumbnail.startswith('http'):
+                image_url = thumbnail
+            elif thumbnail.startswith('/'):
+                image_url = f"{base_url}{thumbnail}"
+
+        # Append venue info to summary if available
+        summary = tldr
+        if venue and venue != "$undefined":
+            summary = f"[{venue}] {tldr}" if tldr else venue
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[BeingBeyond] Scraped {len(posts)} posts from RSC payload")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -879,9 +1072,12 @@ SCRAPERS = {
     "Figure": scrape_figure,
     "Sunday Robotics": scrape_sunday_robotics,
     "Skild AI": scrape_skild_ai,
-    "NVIDIA GEAR": scrape_nvidia_gear,
     "1X Technologies": scrape_1x_technologies,
     "Agility Robotics": scrape_agility_robotics,
+    "Sharpa": scrape_sharpa,
+    "Hexagon Robotics": scrape_hexagon_robotics,
+    "MANUS": scrape_manus,
+    "BeingBeyond": scrape_beingbeyond,
 }
 
 
@@ -933,14 +1129,6 @@ FALLBACK_DATA = {
         ("FAST: Efficient Robot Action Tokenization", "https://www.pi.website/research/fast", datetime(2025, 1, 16), "A new robot action tokenizer that trains generalist policies 5x faster.", None),
         ("pi0: Our First Generalist Policy", "https://www.pi.website/blog/pi0", datetime(2024, 10, 31), "Our first generalist policy combining large-scale data with a new architecture.", None),
     ],
-    "NVIDIA GEAR": [
-        ("Project GR00T: Foundation Model for Humanoid Robots", "https://developer.nvidia.com/project-gr00t", datetime(2024, 3, 18), "NVIDIA's foundation model for building general-purpose humanoid robots.", None),
-        ("Eureka: Human-Level Reward Design via Coding LLMs", "https://eureka-research.github.io/", datetime(2023, 10, 15), "NVIDIA's AI agent that writes reward code for robot training.", None),
-        ("Voyager: Open-Ended Embodied Agent with LLMs", "https://voyager.minedojo.org/", datetime(2023, 5, 15), "An open-ended embodied agent that uses LLMs for lifelong learning in Minecraft.", None),
-        ("MimicPlay: Long-Horizon Imitation Learning", "https://mimic-play.github.io/", datetime(2023, 3, 20), "Learning long-horizon imitation learning from human videos.", None),
-        ("VIMA: Robot Manipulation with Multimodal Prompts", "https://vimalabs.github.io/", datetime(2023, 2, 10), "Generalist robot manipulation with multimodal prompt understanding.", None),
-        ("MineDojo: Open-Ended Embodied Agents", "https://minedojo.org/", datetime(2022, 10, 20), "Building open-ended embodied agents in Minecraft using internet knowledge.", None),
-    ],
     "1X Technologies": [
         ("EVE: General-Purpose Humanoid Platform", "https://www.1x.tech/discover/eve", datetime(2025, 12, 17), "Introducing EVE, a general-purpose humanoid robot platform designed for real-world tasks.", None),
         ("NEO: The Next Generation Android", "https://www.1x.tech/discover/neo", datetime(2025, 8, 15), "Unveiling NEO, an advanced android designed for domestic assistance.", None),
@@ -967,6 +1155,37 @@ FALLBACK_DATA = {
         ("Figure Exceeds $1B in Series C Funding at $39B Post-Money Valuation", "https://www.figure.ai/news/series-c", datetime(2025, 9, 16), "Figure raises $1B in Series C funding.", None),
         ("Helix Loads the Dishwasher", "https://www.figure.ai/news/helix-loads-the-dishwasher", datetime(2025, 9, 3), "Helix demonstrates loading the dishwasher.", None),
         ("Helix Learns to Fold Laundry", "https://www.figure.ai/news/helix-learns-to-fold-laundry", datetime(2025, 8, 12), "Helix learns to fold laundry through AI.", None),
+    ],
+    "Sharpa": [
+        ("Towards Human-Like Manipulation through RL-Augmented Teleoperation and Mixture-of-Dexterous-Experts VLA", "https://www.sharpa.com/blogs/research/peeling-an-apple-with-63-dof-how-imcopilot-mode-vla-are-redefining-robotic-dexterity", datetime(2026, 3, 9), "Peeling an Apple with 63 DoF: How IMCopilot & MoDE-VLA are Redefining Robotic Dexterity", None),
+        ("DexEMG: Towards Dexterous Teleoperation System via EMG2Pose Generalization", "https://www.sharpa.com/blogs/research/breaking-the-barriers-of-teleoperation-how-dexemg-and-sharpa-wave-are-revolutionizing-dexterous-manipulation", datetime(2026, 3, 6), "Breaking the barriers of teleoperation with DexEMG and Sharpa Wave.", None),
+        ("Tacmap: Bridging the Tactile Sim-to-Real Gap via Geometry-Consistent Penetration Depth Map", "https://www.sharpa.com/blogs/research/tacmap-breaking-the-sim-to-real-deadlock-in-tactile-simulation-with-a-geometric-language", datetime(2026, 2, 18), "Breaking the sim-to-real deadlock in tactile simulation with a geometric language.", None),
+        ("EgoScale: Scaling Dexterous Manipulation with Diverse Egocentric Human Data", "https://www.sharpa.com/blogs/research/egoscale-20-000-hours-of-video-grow-a-robot-hand-opening-the-scaling-law-era-of-dexterous-manipulation", datetime(2026, 2, 18), "20,000 hours of video grow a robot hand, opening the scaling law era of dexterous manipulation.", None),
+        ("SimToolReal: An Object-Centric Policy for Zero-Shot Dexterous Tool Manipulation", "https://www.sharpa.com/blogs/research/moving-beyond-specialist-training-simtoolreal-enables-zero-shot-transfer-for-general-purpose-tool-use", datetime(2026, 2, 18), "Moving beyond specialist training for general-purpose tool use.", None),
+        ("Spatially anchored Tactile Awareness for Robust Dexterous Manipulation", "https://www.sharpa.com/blogs/research/giving-robots-spatial-awareness-for-sub-millimeter-dexterous-manipulation", datetime(2026, 1, 28), "Giving robots spatial awareness for sub-millimeter dexterous manipulation.", None),
+    ],
+    "Hexagon Robotics": [
+        ("Hexagon Robotics and Schaeffler deploy a fleet of AEON humanoids", "https://robotics.hexagon.com/hexagon-robotics-and-schaeffler-deploy-a-fleet-of-aeon-humanoids/", datetime(2026, 4, 22), "Hexagon Robotics and Schaeffler deploy a fleet of AEON humanoids.", "https://robotics.hexagon.com/wp-content/uploads/2026/04/Schaeffler_Hexagon_Partnership_AR_JS_new.jpg"),
+        ("Industrial Autonomy Accelerates: Hexagon Robotics pushes Physical AI forward with NVIDIA", "https://robotics.hexagon.com/industrial-autonomy-hexagon-robotics-nvidia-physical-ai/", datetime(2026, 3, 16), "Hexagon Robotics pushes Physical AI forward with NVIDIA.", "https://robotics.hexagon.com/wp-content/uploads/2026/02/P90630892_lowRes_humanoid-robotics-at.jpg"),
+        ("BMW deploys the humanoid robot AEON in production sites in Germany", "https://robotics.hexagon.com/bmw-deploys-aeon-hexagon-robotics-humanoid/", datetime(2026, 2, 27), "BMW deploys the AEON humanoid robot in production sites in Germany.", "https://robotics.hexagon.com/wp-content/uploads/2026/02/BMW-Factory-x-AEON_.jpg"),
+        ("Hexagon Robotics' AEON wins the iF DESIGN AWARD 2026", "https://robotics.hexagon.com/hexagon-robotics-wins-the-if-design-award-2026/", datetime(2026, 2, 25), "AEON wins the iF DESIGN AWARD 2026.", "https://robotics.hexagon.com/wp-content/uploads/2026/02/AEON-Steps-IF-DESIGN-AWARD.jpg"),
+        ("Homo Roboticus: When AI enters the physical world", "https://robotics.hexagon.com/homo-roboticus-when-ai-enters-the-physical-world/", datetime(2026, 2, 13), "When AI enters the physical world.", None),
+        ("Hexagon Robotics partners with Microsoft to advance Physical AI", "https://robotics.hexagon.com/hexagon-robotics-partners-with-microsoft-to-advance-physical-ai/", datetime(2026, 1, 7), "Hexagon Robotics partners with Microsoft to advance Physical AI.", "https://robotics.hexagon.com/wp-content/uploads/2025/07/AEON-Arrives.png"),
+    ],
+    "MANUS": [
+        ("MANUS at NVIDIA GTC 2026: From Jensen Huang's Keynote to the Show Floor", "https://www.manus-meta.com/blog/manus-at-nvidia-gtc-2026", datetime(2026, 3, 26), "MANUS at NVIDIA GTC 2026.", "https://cdn.prod.website-files.com/6641c0152b531df61b2cefca/69c4e80d4ad5c6fe8cf39ed2_use-case-thumbnail.jpg"),
+        ("NVIDIA Launches Isaac Teleop at GTC 2026 With MANUS as the Official Data Glove", "https://www.manus-meta.com/blog/nvidia-launches-isaac-teleop-at-gtc-2026-with-manus-as-the-official-data-glove", datetime(2026, 3, 19), "NVIDIA launches Isaac Teleop at GTC 2026 with MANUS as the official data glove.", "https://cdn.prod.website-files.com/6641c0152b531df61b2cefca/69bbfa95e15a9a4ed1ecd839_thumbnail.jpg"),
+        ("MANUS Gloves Now Natively Supported in NVIDIA Isaac Lab", "https://www.manus-meta.com/blog/manus-gloves-are-natively-supported-in-nvidia-isaac-lab", datetime(2026, 2, 25), "MANUS Gloves now natively supported in NVIDIA Isaac Lab.", "https://cdn.prod.website-files.com/6641c0152b531df61b2cefca/699ec492014b7a0fc62af19c_thumbnail.jpg"),
+        ("Introducing MANUS Metagloves Pro Haptic: Precise Hand Tracking Meets Real-Time Haptic Feedback", "https://www.manus-meta.com/blog/metagloves-pro-haptic-precise-hand-tracking-meets-real-time-haptic-feedback", datetime(2026, 1, 19), "Precise hand tracking meets real-time haptic feedback.", "https://cdn.prod.website-files.com/6641c0152b531df61b2cefca/696f4473064a32d857df5b1d_Flyer_ProHaptic_simple-banner_2025.png"),
+        ("MANUS in Embodied AI: From Human Motion to Robotic Dexterity", "https://www.manus-meta.com/blog/manus-in-embodied-ai-from-human-motion-to-robotic-dexterity", datetime(2025, 11, 3), "From human motion to robotic dexterity.", "https://cdn.prod.website-files.com/6641c0152b531df61b2cefca/690b68ed41de9bc07bfadf4c_thumbnail.jpg"),
+    ],
+    "BeingBeyond": [
+        ("Unmasking the Illusion of Embodied Reasoning in Vision-Language-Action Models", "https://research.beingbeyond.com/better", datetime(2026, 4, 20), "BeTTER probes whether VLA models truly reason under controlled causal interventions, revealing shortcut learning and causal state-tracking failures.", "https://research.beingbeyond.com/projects/better/images/teaser.webp"),
+        ("Being-H0.7: A Latent World-Action Model from Egocentric Videos", "https://research.beingbeyond.com/being-h07", datetime(2026, 4, 14), "Being-H0.7 is a latent world-action model that scales 200,000 hours of egocentric video into future-aware robot control.", "https://research.beingbeyond.com/projects/being-h07/images/thumb.webp"),
+        ("OpenT2M: No-frill Motion Generation with Open-source, Large-scale, High-quality Data", "https://research.beingbeyond.com/opent2m", datetime(2026, 3, 19), "[Accepted: CVPR 2026] OpenT2M introduces a million-level, high-quality motion dataset and MonoFrill for stronger generalization.", "https://research.beingbeyond.com/projects/opent2m/images/2d-prq-pipeline.webp"),
+        ("Joint-Aligned Latent Action: Towards Scalable VLA Pretraining in the Wild", "https://research.beingbeyond.com/jala", datetime(2026, 2, 26), "[Accepted: CVPR 2026] JALA combines lab-annotated and in-the-wild human manipulation data for scalable VLA pretraining.", "https://research.beingbeyond.com/projects/jala/images/fig1.webp"),
+        ("Being-H0.5: Scaling Human-Centric Robot Learning for Cross-Embodiment Generalization", "https://research.beingbeyond.com/being-h05", datetime(2026, 1, 20), "Scaling human-centric robot learning with a Unified Action Space for cross-embodiment generalization.", "https://research.beingbeyond.com/projects/being-h05/images/thumb.webp"),
+        ("Being-H0: Vision-Language-Action Pretraining from Large-Scale Human Videos", "https://research.beingbeyond.com/being-h0", datetime(2025, 7, 21), "The first dexterous VLA model pretrained from large-scale human videos via explicit hand motion modeling.", "https://research.beingbeyond.com/projects/being-h0/images/02_phy_inst_tune.webp"),
     ],
 }
 

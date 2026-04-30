@@ -54,6 +54,7 @@ BLOG_SOURCES = [
     {"name": "Hexagon Robotics", "url": "https://robotics.hexagon.com/news/", "base_url": "https://robotics.hexagon.com", "color": "#0078d4"},
     {"name": "MANUS", "url": "https://www.manus-meta.com/blog", "base_url": "https://www.manus-meta.com", "color": "#1a1a1a"},
     {"name": "BeingBeyond", "url": "https://research.beingbeyond.com/", "base_url": "https://research.beingbeyond.com", "color": "#5b21b6"},
+    {"name": "AGIBOT Finch", "url": "https://finch.agibot.com/research", "base_url": "https://finch.agibot.com", "color": "#d4a853"},
 ]
 
 COMPANY_COLORS = {s["name"]: s["color"] for s in BLOG_SOURCES}
@@ -1061,6 +1062,117 @@ def scrape_beingbeyond(source):
     return posts
 
 
+def scrape_agibot_finch(source):
+    """
+    AGIBOT Finch uses Next.js SSG.
+    Best approach: parse __NEXT_DATA__ JSON blob which contains a researchCards
+    array with id, title, description, subDesc, date, image, largeImage, href.
+    Falls back to HTML parsing if JSON not found.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+
+    # Strategy 1: Parse __NEXT_DATA__ JSON (most reliable)
+    next_data_script = soup.find('script', id='__NEXT_DATA__')
+    if next_data_script:
+        try:
+            next_data = json.loads(next_data_script.string)
+            cards = next_data.get('props', {}).get('pageProps', {}).get('researchCards', [])
+
+            for card in cards:
+                title = card.get('title', '').strip()
+                if not title:
+                    continue
+
+                href = card.get('href', '')
+                url = f"{base_url}{href}" if href.startswith('/') else href
+
+                # Parse date (format: "Apr 30, 2026", "Jan 6, 2026")
+                date_str = card.get('date', '')
+                date = safe_parse_date(date_str, ['%b %d, %Y', '%B %d, %Y'])
+
+                # Use description as primary summary, subDesc as secondary
+                description = card.get('description', '').strip()
+                sub_desc = card.get('subDesc', '').strip()
+                summary = description if description else sub_desc
+
+                # Image: prefer largeImage, fall back to image
+                image_path = card.get('largeImage') or card.get('image')
+                image_url = None
+                if image_path:
+                    if image_path.startswith('http'):
+                        image_url = image_path
+                    elif image_path.startswith('/'):
+                        image_url = f"{base_url}{image_path}"
+
+                posts.append({
+                    "title": title,
+                    "url": url,
+                    "date": date or datetime.min,
+                    "summary": summary,
+                    "image": image_url,
+                    "company": company,
+                })
+
+            logger.info(f"[AGIBOT Finch] Scraped {len(posts)} posts from __NEXT_DATA__")
+            return posts
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.warning(f"[AGIBOT Finch] Failed to parse __NEXT_DATA__: {e}, falling back to HTML")
+
+    # Strategy 2: HTML parsing fallback
+    # Research cards are <a> tags with href starting with /research/
+    seen_urls = set()
+    for a_tag in soup.find_all('a', href=re.compile(r'^/research/.+')):
+        href = a_tag.get('href', '')
+        if not href or href == '/research':
+            continue
+
+        h3 = a_tag.find('h3')
+        if not h3:
+            continue
+
+        title = h3.get_text(strip=True)
+        if not title or len(title) < 2:
+            continue
+
+        url = f"{base_url}{href}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # Date: span with text-[#86909C] class
+        date = None
+        date_span = a_tag.find('span', class_=lambda c: c and '86909C' in c)
+        if date_span:
+            date = safe_parse_date(date_span.get_text(strip=True), ['%b %d, %Y', '%B %d, %Y'])
+
+        # Summary: first <p> with text-black class
+        summary = ""
+        desc_p = a_tag.find('p', class_=lambda c: c and 'text-black' in c)
+        if desc_p:
+            summary = desc_p.get_text(strip=True)
+
+        # Image
+        img = a_tag.find('img', attrs={'data-nimg': True})
+        image_url = _extract_nextjs_image(img, base_url) if img else None
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[AGIBOT Finch] Scraped {len(posts)} posts from HTML")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -1078,6 +1190,7 @@ SCRAPERS = {
     "Hexagon Robotics": scrape_hexagon_robotics,
     "MANUS": scrape_manus,
     "BeingBeyond": scrape_beingbeyond,
+    "AGIBOT Finch": scrape_agibot_finch,
 }
 
 
@@ -1186,6 +1299,12 @@ FALLBACK_DATA = {
         ("Joint-Aligned Latent Action: Towards Scalable VLA Pretraining in the Wild", "https://research.beingbeyond.com/jala", datetime(2026, 2, 26), "[Accepted: CVPR 2026] JALA combines lab-annotated and in-the-wild human manipulation data for scalable VLA pretraining.", "https://research.beingbeyond.com/projects/jala/images/fig1.webp"),
         ("Being-H0.5: Scaling Human-Centric Robot Learning for Cross-Embodiment Generalization", "https://research.beingbeyond.com/being-h05", datetime(2026, 1, 20), "Scaling human-centric robot learning with a Unified Action Space for cross-embodiment generalization.", "https://research.beingbeyond.com/projects/being-h05/images/thumb.webp"),
         ("Being-H0: Vision-Language-Action Pretraining from Large-Scale Human Videos", "https://research.beingbeyond.com/being-h0", datetime(2025, 7, 21), "The first dexterous VLA model pretrained from large-scale human videos via explicit hand motion modeling.", "https://research.beingbeyond.com/projects/being-h0/images/02_phy_inst_tune.webp"),
+    ],
+    "AGIBOT Finch": [
+        ("LWD", "https://finch.agibot.com/research/lwd", datetime(2026, 4, 30), "Learning While Deploying turns real-world robot deployment into a continual reinforcement learning loop, where a shared generalist VLA policy improves from the experience collected by a robot fleet.", "https://finch.agibot.com/images/research/lwd-large.png"),
+        ("SOP", "https://finch.agibot.com/research/sop", datetime(2026, 1, 6), "Scalable Online Post-Training for VLA Models", "https://finch.agibot.com/images/research/sop-large.png"),
+        ("Act2Goal", "https://finch.agibot.com/research/act-2-goal", datetime(2026, 1, 1), "From World Model to General Goal-Conditioned Policy", "https://finch.agibot.com/images/research/act2-goal-large.png"),
+        ("UniFact", "https://finch.agibot.com/research/uni-fact", datetime(2026, 1, 1), "Unified Embodied VLM Reasoning with Robotic Action", "https://finch.agibot.com/images/research/uni-fact-large.png"),
     ],
 }
 

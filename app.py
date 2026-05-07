@@ -55,6 +55,7 @@ BLOG_SOURCES = [
     {"name": "MANUS", "url": "https://www.manus-meta.com/blog", "base_url": "https://www.manus-meta.com", "color": "#1a1a1a"},
     {"name": "BeingBeyond", "url": "https://research.beingbeyond.com/", "base_url": "https://research.beingbeyond.com", "color": "#5b21b6"},
     {"name": "AGIBOT Finch", "url": "https://finch.agibot.com/research", "base_url": "https://finch.agibot.com", "color": "#d4a853"},
+    {"name": "Genesis AI", "url": "https://www.genesis.ai/blog", "base_url": "https://www.genesis.ai", "color": "#2a9d8f"},
 ]
 
 COMPANY_COLORS = {s["name"]: s["color"] for s in BLOG_SOURCES}
@@ -1173,6 +1174,83 @@ def scrape_agibot_finch(source):
     return posts
 
 
+def scrape_genesis_ai(source):
+    """
+    Genesis AI uses SvelteKit with SSR (DatoCMS backend).
+    Blog articles are <a> tags with href starting with /blog/.
+    Titles in <h2 class="text-article-title">, dates and categories
+    in <p class="text-eyebrow"> elements. Thumbnails are Mux video
+    poster images in <img class="video-thumbnail">.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    for a_tag in soup.find_all('a', href=re.compile(r'^/blog/.+')):
+        href = a_tag.get('href', '')
+        if not href or href == '/blog' or href == '/blog/':
+            continue
+
+        # Must contain a heading (h2) to be an article card
+        h2 = a_tag.find('h2', class_='text-article-title')
+        if not h2:
+            continue
+
+        title = h2.get_text(strip=True)
+        if not title or len(title) < 3:
+            continue
+
+        url = f"{base_url}{href}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # Date and category from <p class="text-eyebrow"> elements
+        date = None
+        eyebrows = a_tag.find_all('p', class_='text-eyebrow')
+        for eyebrow in eyebrows:
+            classes = eyebrow.get('class', [])
+            # Skip the category tag (has color-faded class)
+            if 'color-faded' in classes:
+                continue
+            text = eyebrow.get_text(strip=True)
+            # Skip post count text like "1 posts"
+            if 'post' in text.lower():
+                continue
+            parsed = safe_parse_date(text, ['%B %d, %Y', '%b %d, %Y'])
+            if parsed:
+                date = parsed
+                break
+
+        # Image: Mux video thumbnail or regular img
+        image_url = None
+        img = a_tag.find('img', class_='video-thumbnail')
+        if not img:
+            img = a_tag.find('img')
+        if img:
+            src = img.get('src', '')
+            if src.startswith('http'):
+                image_url = src
+            elif src.startswith('/'):
+                image_url = f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": "",
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[Genesis AI] Scraped {len(posts)} posts")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -1191,6 +1269,7 @@ SCRAPERS = {
     "MANUS": scrape_manus,
     "BeingBeyond": scrape_beingbeyond,
     "AGIBOT Finch": scrape_agibot_finch,
+    "Genesis AI": scrape_genesis_ai,
 }
 
 
@@ -1299,6 +1378,9 @@ FALLBACK_DATA = {
         ("Joint-Aligned Latent Action: Towards Scalable VLA Pretraining in the Wild", "https://research.beingbeyond.com/jala", datetime(2026, 2, 26), "[Accepted: CVPR 2026] JALA combines lab-annotated and in-the-wild human manipulation data for scalable VLA pretraining.", "https://research.beingbeyond.com/projects/jala/images/fig1.webp"),
         ("Being-H0.5: Scaling Human-Centric Robot Learning for Cross-Embodiment Generalization", "https://research.beingbeyond.com/being-h05", datetime(2026, 1, 20), "Scaling human-centric robot learning with a Unified Action Space for cross-embodiment generalization.", "https://research.beingbeyond.com/projects/being-h05/images/thumb.webp"),
         ("Being-H0: Vision-Language-Action Pretraining from Large-Scale Human Videos", "https://research.beingbeyond.com/being-h0", datetime(2025, 7, 21), "The first dexterous VLA model pretrained from large-scale human videos via explicit hand motion modeling.", "https://research.beingbeyond.com/projects/being-h0/images/02_phy_inst_tune.webp"),
+    ],
+    "Genesis AI": [
+        ("GENE-26.5: Advancing Robotic Manipulation to Human Level", "https://www.genesis.ai/blog/gene-26-5-advancing-robotic-manipulation-to-human-level", datetime(2026, 5, 7), "", "https://image.mux.com/N6002aDbA86yrpGu6MhH51wcPtkQgaRMN/thumbnail.jpg?width=2048&height=1152&fit_mode=pad&time=0.5"),
     ],
     "AGIBOT Finch": [
         ("LWD", "https://finch.agibot.com/research/lwd", datetime(2026, 4, 30), "Learning While Deploying turns real-world robot deployment into a continual reinforcement learning loop, where a shared generalist VLA policy improves from the experience collected by a robot fleet.", "https://finch.agibot.com/images/research/lwd-large.png"),

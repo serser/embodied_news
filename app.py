@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Embodied AI News Aggregator - Live Scraping with Fallback
-Fetches live data from 9 blog sources, falls back to cached data on failure.
+Fetches live data from blog sources, falls back to cached data on failure.
 """
 
 from flask import Flask, render_template, jsonify
@@ -56,6 +56,7 @@ BLOG_SOURCES = [
     {"name": "BeingBeyond", "url": "https://research.beingbeyond.com/", "base_url": "https://research.beingbeyond.com", "color": "#5b21b6"},
     {"name": "AGIBOT Finch", "url": "https://finch.agibot.com/research", "base_url": "https://finch.agibot.com", "color": "#d4a853"},
     {"name": "Genesis AI", "url": "https://www.genesis.ai/blog", "base_url": "https://www.genesis.ai", "color": "#2a9d8f"},
+    {"name": "Ropedia", "url": "https://ropedia.com/", "base_url": "https://ropedia.com", "color": "#ccffa0"},
 ]
 
 COMPANY_COLORS = {s["name"]: s["color"] for s in BLOG_SOURCES}
@@ -1251,6 +1252,77 @@ def scrape_genesis_ai(source):
     return posts
 
 
+def scrape_ropedia(source):
+    """
+    Ropedia (ropedia.com) is a static HTML site. There is no /blog index page;
+    blog posts are listed on the homepage under the "News" section.
+    Each card is an <a class="card card--news"> with:
+    - href to /blog/<slug>.html
+    - image in .card__icon img
+    - meta text in .card__meta (format: "16 Dec 2025 · Product Release")
+    - title in .card__title
+    - body in .card__body
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    for card in soup.find_all('a', class_=lambda c: c and 'card--news' in c):
+        href = card.get('href', '')
+        if not href:
+            continue
+
+        url = href if href.startswith('http') else f"{base_url}{href}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        title_el = card.find(class_='card__title')
+        title = title_el.get_text(strip=True) if title_el else ""
+        if not title:
+            continue
+
+        # Date from .card__meta - format: "16 Dec 2025 · Product Release"
+        date = None
+        meta_el = card.find(class_='card__meta')
+        if meta_el:
+            meta_text = meta_el.get_text(strip=True)
+            # Take the part before " · "
+            date_part = meta_text.split('·')[0].strip()
+            date = safe_parse_date(date_part, ['%d %b %Y', '%d %B %Y'])
+
+        body_el = card.find(class_='card__body')
+        summary = body_el.get_text(strip=True) if body_el else ""
+
+        # Image
+        image_url = None
+        img = card.find('img')
+        if img:
+            src = img.get('src', '')
+            if src.startswith('http'):
+                image_url = src
+            elif src.startswith('//'):
+                image_url = f"https:{src}"
+            elif src.startswith('/'):
+                image_url = f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[Ropedia] Scraped {len(posts)} posts")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -1270,6 +1342,7 @@ SCRAPERS = {
     "BeingBeyond": scrape_beingbeyond,
     "AGIBOT Finch": scrape_agibot_finch,
     "Genesis AI": scrape_genesis_ai,
+    "Ropedia": scrape_ropedia,
 }
 
 
@@ -1388,6 +1461,10 @@ FALLBACK_DATA = {
         ("Act2Goal", "https://finch.agibot.com/research/act-2-goal", datetime(2026, 1, 1), "From World Model to General Goal-Conditioned Policy", "https://finch.agibot.com/images/research/act2-goal-large.png"),
         ("UniFact", "https://finch.agibot.com/research/uni-fact", datetime(2026, 1, 1), "Unified Embodied VLM Reasoning with Robotic Action", "https://finch.agibot.com/images/research/uni-fact-large.png"),
     ],
+    "Ropedia": [
+        ("Xperience-10M Dataset Release", "https://ropedia.com/blog/20260316_xperience_10m.html", datetime(2026, 3, 16), "We released Xperience-10M, a large-scale multimodal 4D human Xperience dataset for embodied AI.", "https://ropedia.com/img/xperience-10m-banner.png"),
+        ("Introducing HOMIE", "https://ropedia.com/blog/20251216_introducing_ropedia.html", datetime(2025, 12, 16), "We introduced HOMIE, our human-centric platform for capturing and structuring real-world Xperience at scale.", "https://ropedia.com/img/homie-id-sample.png"),
+    ],
 }
 
 
@@ -1451,7 +1528,7 @@ def get_all_posts(force_refresh=False):
     logger.info("Fetching posts from all sources...")
     all_posts = []
 
-    with ThreadPoolExecutor(max_workers=9) as executor:
+    with ThreadPoolExecutor(max_workers=len(BLOG_SOURCES)) as executor:
         futures = {executor.submit(fetch_blog_posts, source): source for source in BLOG_SOURCES}
         for future in as_completed(futures):
             source = futures[future]

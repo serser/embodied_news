@@ -57,6 +57,7 @@ BLOG_SOURCES = [
     {"name": "AGIBOT Finch", "url": "https://finch.agibot.com/research", "base_url": "https://finch.agibot.com", "color": "#d4a853"},
     {"name": "Genesis AI", "url": "https://www.genesis.ai/blog", "base_url": "https://www.genesis.ai", "color": "#2a9d8f"},
     {"name": "Ropedia", "url": "https://ropedia.com/", "base_url": "https://ropedia.com", "color": "#ccffa0"},
+    {"name": "OneRobotics", "url": "https://www.onerobot.com/news", "base_url": "https://www.onerobot.com", "color": "#1e90ff"},
 ]
 
 COMPANY_COLORS = {s["name"]: s["color"] for s in BLOG_SOURCES}
@@ -1323,6 +1324,93 @@ def scrape_ropedia(source):
     return posts
 
 
+def scrape_onerobot(source):
+    """
+    OneRobotics (onerobot.com) is a server-rendered PHP site (layui-based).
+    News list at /news with pagination via ?page=N. Each article is a <li>
+    inside div.news-list > ul:
+    - Link: <a href="/news/<id>">
+    - Date: <div class="t1"> (format "YYYY-MM-DD")
+    - Title: <div class="t2 font24">
+    - Image: <img src="/uploads/..."> inside div.public-img (or div.img)
+    No summaries on the listing page or detail page meta.
+    Paginates through all pages (small site, ~3 pages).
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+
+    posts = []
+    seen_urls = set()
+    MAX_PAGES = 10
+
+    for page in range(1, MAX_PAGES + 1):
+        url = source["url"] if page == 1 else f"{source['url']}?page={page}"
+        try:
+            response = make_request(url)
+        except requests.exceptions.HTTPError:
+            break
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+        news_list = soup.find('div', class_='news-list')
+        if not news_list:
+            break
+
+        items = news_list.find_all('li')
+        if not items:
+            break
+
+        page_added = 0
+        for li in items:
+            link = li.find('a', href=re.compile(r'^/news/\d+'))
+            if not link:
+                continue
+            href = link.get('href', '')
+            post_url = f"{base_url}{href}"
+            if post_url in seen_urls:
+                continue
+
+            title_el = link.find('div', class_='t2')
+            title = title_el.get_text(strip=True) if title_el else ""
+            if not title or len(title) < 3:
+                continue
+
+            date_el = link.find('div', class_='t1')
+            date_str = date_el.get_text(strip=True) if date_el else None
+            date = safe_parse_date(date_str, ['%Y-%m-%d']) if date_str else None
+
+            image_url = None
+            img_container = link.find('div', class_='public-img') or li.find('div', class_='img')
+            if img_container:
+                img = img_container.find('img')
+                if img:
+                    src = img.get('src', '')
+                    if src.startswith('http'):
+                        image_url = src
+                    elif src.startswith('//'):
+                        image_url = f"https:{src}"
+                    elif src.startswith('/'):
+                        image_url = f"{base_url}{src}"
+
+            seen_urls.add(post_url)
+            page_added += 1
+            posts.append({
+                "title": title,
+                "url": post_url,
+                "date": date or datetime.min,
+                "summary": "",
+                "image": image_url,
+                "company": company,
+            })
+
+        next_link = soup.find('a', class_='next')
+        has_next = bool(next_link and next_link.get('href') and 'page=' in next_link.get('href', ''))
+        if not has_next or page_added == 0:
+            break
+
+    logger.info(f"[OneRobotics] Scraped {len(posts)} posts")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -1343,6 +1431,7 @@ SCRAPERS = {
     "AGIBOT Finch": scrape_agibot_finch,
     "Genesis AI": scrape_genesis_ai,
     "Ropedia": scrape_ropedia,
+    "OneRobotics": scrape_onerobot,
 }
 
 
@@ -1464,6 +1553,14 @@ FALLBACK_DATA = {
     "Ropedia": [
         ("Xperience-10M Dataset Release", "https://ropedia.com/blog/20260316_xperience_10m.html", datetime(2026, 3, 16), "We released Xperience-10M, a large-scale multimodal 4D human Xperience dataset for embodied AI.", "https://ropedia.com/img/xperience-10m-banner.png"),
         ("Introducing HOMIE", "https://ropedia.com/blog/20251216_introducing_ropedia.html", datetime(2025, 12, 16), "We introduced HOMIE, our human-centric platform for capturing and structuring real-world Xperience at scale.", "https://ropedia.com/img/homie-id-sample.png"),
+    ],
+    "OneRobotics": [
+        ("No.1 in Real-Robot Benchmarks: OneRobotics Launches Its Proprietary World Action Model, OneModel 1.7 FrontoStria-RL", "https://www.onerobot.com/news/27", datetime(2026, 5, 20), "", "https://www.onerobot.com/uploads/upload/images/20260520/c1143671758f903d1ab028adab460be7.png"),
+        ("OneRobotics Secures RMB 45 Million Bid for Embodied Intelligence Data Infrastructure Project, Accelerating Real-World Data Closed-Loop Development", "https://www.onerobot.com/news/26", datetime(2026, 5, 18), "", "https://www.onerobot.com/uploads/upload/images/20260518/f710c6dfaba5a4a65a956bee231f45e2.png"),
+        ("OneRobotics Featured on Japan's NHK: Embodied Home Robots Go Global from China", "https://www.onerobot.com/news/24", datetime(2026, 5, 12), "", "https://www.onerobot.com/uploads/upload/images/20260512/11a4105ac3d0dd1494bb1abcc496bf17.png"),
+        ("OneRobotics Brings \u201cOne Brain, Multiple Embodiments\u201d to Campus, with Acemate Becoming the Ultimate AI Teaching Assistant", "https://www.onerobot.com/news/22", datetime(2026, 5, 6), "", "https://www.onerobot.com/uploads/upload/images/20260506/93c83682b8d29708996bc456baf60240.png"),
+        ("OneRobotics Launches Embodied Intelligence Chain with First Post-IPO Strategic Investment", "https://www.onerobot.com/news/20", datetime(2026, 4, 14), "", "https://www.onerobot.com/uploads/upload/images/20260506/52fc740c09223022840bff25cf62e938.png"),
+        ("Defining a new paradigm for home embodied intelligence: OneRobotics AI Hub becomes the world's first local home AI agent officially supporting OpenClaw", "https://www.onerobot.com/news/19", datetime(2026, 2, 11), "", "https://www.onerobot.com/uploads/upload/images/20260211/046d9aeb0dc591af2dc1983f14665fa6.jpg"),
     ],
 }
 

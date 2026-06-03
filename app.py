@@ -58,7 +58,22 @@ BLOG_SOURCES = [
     {"name": "Genesis AI", "url": "https://www.genesis.ai/blog", "base_url": "https://www.genesis.ai", "color": "#2a9d8f"},
     {"name": "Ropedia", "url": "https://ropedia.com/", "base_url": "https://ropedia.com", "color": "#ccffa0"},
     {"name": "OneRobotics", "url": "https://www.onerobot.com/news", "base_url": "https://www.onerobot.com", "color": "#1e90ff"},
+    {"name": "Galaxea", "url": "https://opengalaxea.github.io/G05/", "base_url": "https://opengalaxea.github.io/G05", "color": "#7c3aed"},
+    {"name": "Spirit AI", "url": "https://www.spirit-ai.com/en/blog/", "base_url": "https://www.spirit-ai.com", "color": "#0ea5e9"},
+    {"name": "Xiaomi Robotics", "url": "https://robotics.xiaomi.com/", "base_url": "https://robotics.xiaomi.com", "color": "#ff6900"},
+    {"name": "ByteDance Seed", "url": "https://seed.bytedance.com/en/direction/robotics", "base_url": "https://seed.bytedance.com", "color": "#325ab4"},
+    {"name": "NVIDIA Blog", "url": "https://blogs.nvidia.com/blog/category/robotics/feed/", "base_url": "https://blogs.nvidia.com", "color": "#76b900"},
+    {"name": "NVIDIA GEAR", "url": "https://research.nvidia.com/labs/gear/", "base_url": "https://research.nvidia.com", "color": "#1a7f37"},
+    {"name": "X Square Robot", "url": "https://x2robot.com/en/news", "base_url": "https://x2robot.com", "color": "#0d9488"},
+    {"name": "Sanctuary AI", "url": "https://www.sanctuary.ai/blog/rss.xml", "base_url": "https://www.sanctuary.ai", "color": "#c026d3"},
+    {"name": "Boston Dynamics", "url": "https://bostondynamics.com/blog/", "base_url": "https://bostondynamics.com", "color": "#005288"},
+    {"name": "NVIDIA Cosmos Lab", "url": "https://research.nvidia.com/labs/cosmos-lab/", "base_url": "https://research.nvidia.com", "color": "#4ade80"},
+    {"name": "Agile Robots", "url": "https://www.agile-robots.com/en/news/", "base_url": "https://www.agile-robots.com", "color": "#e11d48"},
+    {"name": "DexForce", "url": "https://www.dexforce.com/core.html", "base_url": "https://www.dexforce.com", "color": "#f97316"},
 ]
+
+# Display companies alphabetically (A-Z) by name.
+BLOG_SOURCES.sort(key=lambda s: s["name"].lower())
 
 COMPANY_COLORS = {s["name"]: s["color"] for s in BLOG_SOURCES}
 
@@ -128,6 +143,20 @@ def has_real_image(post):
     """Check if post has a real image (not a placeholder SVG)."""
     image = post.get("image", "")
     return image and not image.startswith("data:image/svg")
+
+
+SUMMARY_MAX_LENGTH = 220
+
+
+def compress_summary(summary, max_length=SUMMARY_MAX_LENGTH):
+    """Truncate an over-long summary at a word boundary and add an ellipsis."""
+    if not summary or len(summary) <= max_length:
+        return summary
+    truncated = summary[:max_length].rstrip()
+    last_space = truncated.rfind(' ')
+    if last_space > max_length * 0.6:
+        truncated = truncated[:last_space].rstrip()
+    return truncated.rstrip('.,;:!?-\u2013\u2014') + '\u2026'
 
 
 def safe_parse_date(date_str, formats):
@@ -1411,6 +1440,848 @@ def scrape_onerobot(source):
     return posts
 
 
+def scrape_galaxea(source):
+    """
+    Galaxea (opengalaxea.github.io/G05) is a client-rendered React/Vite SPA
+    hosted on GitHub Pages. The index.html is an empty shell; all content lives
+    in a hashed JS bundle (e.g. /assets/index-<hash>.js).
+
+    Strategy: fetch index.html, find the bundle <script src>, fetch the bundle,
+    then regex-extract the embedded title, date, and abstract strings.
+    The page is a single project page / technical report (one post).
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    # Find the main JS bundle referenced by the SPA shell
+    bundle_url = None
+    for script in soup.find_all('script', src=True):
+        src = script.get('src', '')
+        if '/assets/' in src and src.endswith('.js'):
+            if src.startswith('http'):
+                bundle_url = src
+            elif src.startswith('./'):
+                bundle_url = f"{base_url}/{src[2:]}"
+            elif src.startswith('/'):
+                bundle_url = f"https://opengalaxea.github.io{src}"
+            else:
+                bundle_url = f"{base_url}/{src}"
+            break
+
+    if not bundle_url:
+        logger.warning(f"[Galaxea] No JS bundle found, using fallback")
+        return []
+
+    bundle = make_request(bundle_url).text
+
+    # Title is split across JSX nodes in the bundle: the prefix
+    # ("Introducing G0.5: ") sits before a <br>/<span>, and the remainder is
+    # the next React `children:"..."` string. Reassemble both halves.
+    title = None
+    prefix_match = re.search(r'(Introducing G0\.5:\s*)"', bundle)
+    if prefix_match:
+        prefix = prefix_match.group(1).strip()
+        rest_match = re.search(r'children:"([^"]+)"', bundle[prefix_match.end():])
+        suffix = rest_match.group(1).strip() if rest_match else ""
+        title = f"{prefix} {suffix}".strip() if suffix else prefix
+    if not title:
+        report_match = re.search(r'Galaxea G0\.5 Technical Report', bundle)
+        if report_match:
+            title = report_match.group(0).strip()
+    if not title:
+        logger.warning(f"[Galaxea] Could not extract title, using fallback")
+        return []
+
+    # Date: look for a "Month DD, YYYY" string in the bundle
+    date = None
+    date_match = re.search(
+        r'((?:January|February|March|April|May|June|July|August|'
+        r'September|October|November|December)\s+\d{1,2},\s*\d{4})',
+        bundle)
+    if date_match:
+        date = safe_parse_date(date_match.group(1), ['%B %d, %Y'])
+
+    # Summary: the abstract sentence describing the model
+    summary = ""
+    summary_match = re.search(
+        r'A pretrained autoregressive Vision-Language-Action model[^"\'`]+',
+        bundle)
+    if summary_match:
+        summary = summary_match.group(0).strip()
+
+    posts = [{
+        "title": title,
+        "url": source["url"],
+        "date": date or datetime.min,
+        "summary": summary,
+        "image": None,  # No static thumbnail exposed on the project page
+        "company": company,
+    }]
+
+    logger.info(f"[Galaxea] Scraped {len(posts)} posts from JS bundle")
+    return posts
+
+
+def scrape_spirit_ai(source):
+    """
+    Spirit AI (千寻智能, spirit-ai.com) is a client-rendered Vite SPA. The blog
+    shell HTML is empty (<div id="app">); posts are baked into a lazily-loaded
+    JS chunk (assets/blogs-<hash>.js) as a `Gi=[{...}]` array of English posts.
+
+    Strategy: index.html -> main index-<hash>.js -> blogs-<hash>.js chunk, then
+    regex-extract each post object's id, title, summary, cover and date fields.
+    Each post object starts with `{id:"..."`; English URLs are /en/blog/<id>.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+
+    main_match = re.search(r'src="(/blog/assets/index-[^"]+\.js)"', response.text)
+    if not main_match:
+        logger.warning(f"[Spirit AI] No main JS bundle found, using fallback")
+        return []
+    main_js = make_request(f"{base_url}{main_match.group(1)}").text
+
+    chunk_match = re.search(r'(assets/blogs-[A-Za-z0-9_-]+\.js)', main_js)
+    if not chunk_match:
+        logger.warning(f"[Spirit AI] No blogs chunk found, using fallback")
+        return []
+    chunk = make_request(f"{base_url}/blog/{chunk_match.group(1)}").text
+
+    array_match = re.search(r'Gi=\[(.*?)\];', chunk, re.DOTALL)
+    if not array_match:
+        logger.warning(f"[Spirit AI] No English post array found, using fallback")
+        return []
+    array_body = array_match.group(1)
+
+    posts = []
+    seen_ids = set()
+    for block_match in re.finditer(r'\{id:"', array_body):
+        block = array_body[block_match.start():]
+
+        id_m = re.search(r'id:"([^"]+)"', block)
+        title_m = re.search(r'title:"([^"]+)"', block)
+        if not id_m or not title_m:
+            continue
+        post_id = id_m.group(1)
+        if post_id in seen_ids:
+            continue
+        seen_ids.add(post_id)
+
+        summary_m = re.search(r'summary:`([^`]*)`', block)
+        summary = summary_m.group(1).strip() if summary_m else ""
+
+        date_m = re.search(r'date:"([^"]+)"', block)
+        date = safe_parse_date(date_m.group(1), ['%Y-%m-%d']) if date_m else None
+
+        cover_m = re.search(r'cover:"([^"]+)"', block)
+        image = None
+        if cover_m:
+            cover = cover_m.group(1)
+            image = cover if cover.startswith('http') else f"{base_url}{cover}"
+
+        posts.append({
+            "title": title_m.group(1).strip(),
+            "url": f"{base_url}/en/blog/{post_id}",
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image,
+            "company": company,
+        })
+
+    logger.info(f"[Spirit AI] Scraped {len(posts)} posts from JS chunk")
+    return posts
+
+
+def scrape_xiaomi_robotics(source):
+    """
+    Xiaomi Robotics (robotics.xiaomi.com) is a Vue SSR site: blog cards are
+    rendered server-side into the HTML under <section id="blog">. Each card is
+    an <a class="blog-card"> with img.blog-card-image, span.blog-card-date,
+    h3.blog-card-title and p.blog-card-excerpt. Cover images are absolute URLs.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    for card in soup.find_all('a', class_='blog-card'):
+        href = card.get('href', '')
+        if not href:
+            continue
+        url = href if href.startswith('http') else f"{base_url}{href}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        title_el = card.find('h3', class_='blog-card-title')
+        title = title_el.get_text(strip=True) if title_el else ""
+        if not title:
+            continue
+
+        date_el = card.find('span', class_='blog-card-date')
+        date = safe_parse_date(date_el.get_text(strip=True), ['%b %d, %Y', '%B %d, %Y']) if date_el else None
+
+        excerpt_el = card.find('p', class_='blog-card-excerpt')
+        summary = excerpt_el.get_text(strip=True) if excerpt_el else ""
+
+        image_url = None
+        img = card.find('img', class_='blog-card-image')
+        if img:
+            src = img.get('src', '')
+            if src.startswith('http'):
+                image_url = src
+            elif src.startswith('//'):
+                image_url = f"https:{src}"
+            elif src.startswith('/'):
+                image_url = f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[Xiaomi Robotics] Scraped {len(posts)} posts")
+    return posts
+
+
+def _extract_js_object(text, start_index):
+    """
+    Extract a balanced {...} JSON object from `text` starting at the first '{'
+    at/after start_index. Needed because embedded JS blobs contain '};'
+    sequences inside strings/nested objects that defeat a non-greedy regex.
+    Tracks string literals (single/double quotes) and escapes to find the
+    matching closing brace.
+    """
+    brace_start = text.find('{', start_index)
+    if brace_start == -1:
+        return None
+    depth = 0
+    in_str = False
+    escaped = False
+    quote = ''
+    for i in range(brace_start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == '\\':
+                escaped = True
+            elif ch == quote:
+                in_str = False
+        else:
+            if ch == '"' or ch == "'":
+                in_str = True
+                quote = ch
+            elif ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    return text[brace_start:i + 1]
+    return None
+
+
+def scrape_bytedance_seed(source):
+    """
+    ByteDance Seed (seed.bytedance.com) is a Modern.js/React app. The robotics
+    publication list is embedded as JSON in a `window._ROUTER_DATA = {...}`
+    script. Articles live at loaderData["(locale$)/direction/(type)/page"]
+    ["article_list"], each with ArticleMeta (PublishDate epoch-ms, ExternalLinks,
+    Journal, Thumbnail/Cover) and ArticleSubContentEn (Title, Abstract).
+    Publication links point to external destinations (mostly arXiv).
+    """
+    company = source["name"]
+    response = make_request(source["url"])
+    html = response.text
+
+    marker = html.find('window._ROUTER_DATA')
+    if marker == -1:
+        logger.warning(f"[ByteDance Seed] No _ROUTER_DATA found, using fallback")
+        return []
+
+    raw = _extract_js_object(html, marker)
+    if not raw:
+        logger.warning(f"[ByteDance Seed] Could not extract _ROUTER_DATA JSON, using fallback")
+        return []
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.warning(f"[ByteDance Seed] _ROUTER_DATA JSON parse failed: {e}, using fallback")
+        return []
+
+    loader_data = data.get('loaderData', {})
+    article_list = []
+    for page in loader_data.values():
+        if isinstance(page, dict) and page.get('article_list'):
+            article_list = page['article_list']
+            break
+
+    posts = []
+    seen_urls = set()
+    for article in article_list:
+        meta = article.get('ArticleMeta', {})
+        content = article.get('ArticleSubContentEn') or {}
+
+        title = (content.get('Title') or '').strip()
+        if not title:
+            continue
+
+        # Prefer the external publication link (arXiv etc.); fall back to page
+        url = None
+        for link in meta.get('ExternalLinks') or []:
+            link_url = link.get('Link')
+            if link_url:
+                url = link_url
+                break
+        if not url:
+            url = source["url"]
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # PublishDate is epoch milliseconds
+        date = None
+        publish_ms = meta.get('PublishDate')
+        if isinstance(publish_ms, (int, float)) and publish_ms > 0:
+            date = datetime.fromtimestamp(publish_ms / 1000)
+
+        summary = (content.get('Abstract') or '').strip()
+        journal = (meta.get('Journal') or '').strip()
+        if journal:
+            summary = f"[{journal}] {summary}" if summary else journal
+
+        image = (meta.get('Cover') or meta.get('Thumbnail') or '').strip() or None
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image,
+            "company": company,
+        })
+
+    logger.info(f"[ByteDance Seed] Scraped {len(posts)} posts from _ROUTER_DATA")
+    return posts
+
+
+def scrape_nvidia_blog(source):
+    """
+    NVIDIA Blog (blogs.nvidia.com) is a WordPress site. The robotics category
+    exposes a standard RSS feed (source["url"] points to .../robotics/feed/)
+    which is more robust than HTML scraping: each <item> carries title, link,
+    pubDate (RFC 822) and an HTML <description> excerpt, plus a Yahoo Media RSS
+    <media:content url="..."> featured image. Descriptions are HTML-wrapped and
+    end with a "[...]" / "[…]" read-more ellipsis that we strip.
+    """
+    company = source["name"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'xml')
+
+    posts = []
+    seen_urls = set()
+
+    for item in soup.find_all('item'):
+        title_el = item.find('title')
+        link_el = item.find('link')
+        if not title_el or not link_el:
+            continue
+        title = title_el.get_text(strip=True)
+        url = link_el.get_text(strip=True)
+        if not title or not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        date = None
+        pubdate_el = item.find('pubDate')
+        if pubdate_el:
+            date = safe_parse_date(pubdate_el.get_text(strip=True), ['%a, %d %b %Y %H:%M:%S %z'])
+            # pubDate is timezone-aware; drop tzinfo so it sorts alongside the
+            # naive datetimes produced by every other source and the fallback.
+            if date is not None:
+                date = date.replace(tzinfo=None)
+
+        summary = ""
+        desc_el = item.find('description')
+        if desc_el:
+            desc_text = BeautifulSoup(desc_el.get_text(), 'html.parser').get_text(strip=True)
+            summary = re.sub(r'\s*\[(?:\.\.\.|…|\u2026)\]\s*$', '', desc_text).strip()
+
+        image = None
+        media = item.find('media:content') or item.find('content', recursive=True)
+        if media and media.get('url'):
+            image = media.get('url')
+        if not image:
+            enclosure = item.find('enclosure')
+            if enclosure and enclosure.get('url'):
+                image = enclosure.get('url')
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image,
+            "company": company,
+        })
+
+    logger.info(f"[NVIDIA Blog] Scraped {len(posts)} posts from RSS feed")
+    return posts
+
+
+def scrape_nvidia_gear(source):
+    """
+    NVIDIA GEAR lab (research.nvidia.com/labs/gear) is a Next.js static export.
+    The publications page is client-rendered (empty in SSR HTML), but each
+    individual project/blog page IS server-side rendered with a stable template:
+    <article class="Home_blogPost__*"> containing a .Home_blogTitle__* heading
+    and a .Home_publishDate__* date. Project routes are enumerated from the
+    Next.js _buildManifest.js (e.g. /dreamgen, /egoscale, /flare, /gr00t-n1_5,
+    /gr00t-n1_6); we fetch each and parse its blog article. Dates appear in
+    mixed formats ("Feb 19, 2026" and "15 December 2025").
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    gear_path = "/labs/gear"
+
+    # Known project/blog routes, used directly if route discovery via the
+    # Next.js build manifest fails (the CDN occasionally rate-limits the
+    # _next/static asset requests).
+    known_routes = ['/dreamgen', '/egoscale', '/flare', '/gr00t-n1_5', '/gr00t-n1_6']
+    skip = {'/_app', '/_error', '/_document', '/publications'}
+
+    routes = []
+    try:
+        home = make_request(source["url"]).text
+        build_match = re.search(r'/_next/static/([^/"]+)/_buildManifest\.js', home)
+        if build_match:
+            build_id = build_match.group(1)
+            manifest = make_request(f"{base_url}{gear_path}/_next/static/{build_id}/_buildManifest.js").text
+            for route in re.findall(r'"(/[a-zA-Z0-9_\-]+)"', manifest):
+                if route in skip or route.endswith('-no-header') or route in routes:
+                    continue
+                routes.append(route)
+    except requests.exceptions.RequestException:
+        pass
+
+    if not routes:
+        routes = known_routes
+
+    date_formats = ['%b %d, %Y', '%B %d, %Y', '%d %b %Y', '%d %B %Y']
+    posts = []
+    seen_urls = set()
+
+    for route in routes:
+        page_url = f"{base_url}{gear_path}{route}/"
+        try:
+            page_html = make_request(page_url).content
+        except requests.exceptions.RequestException:
+            continue
+
+        soup = BeautifulSoup(page_html, 'html.parser')
+        article = soup.find('article', class_=lambda c: c and 'blogPost' in c)
+        if not article:
+            continue
+
+        title_el = soup.find(class_=lambda c: c and 'blogTitle' in c)
+        if not title_el:
+            continue
+        # Prefer the concise document <title> over the heading, which often
+        # concatenates the project name with a long subtitle.
+        doc_title = soup.find('title')
+        title = doc_title.get_text(strip=True) if doc_title else title_el.get_text(strip=True)
+        if not title:
+            continue
+
+        if page_url in seen_urls:
+            continue
+        seen_urls.add(page_url)
+
+        date = None
+        date_el = soup.find(class_=lambda c: c and 'publishDate' in c)
+        if date_el:
+            date = safe_parse_date(date_el.get_text(strip=True), date_formats)
+
+        # Only use still-image sources for the thumbnail; a <video> src is not
+        # renderable in the <img> the UI uses, so fall back to a placeholder.
+        image_url = None
+        img = article.find('img')
+        if img:
+            src = img.get('src', '')
+            if re.search(r'\.(png|jpe?g|webp|gif|svg)(\?|$)', src, re.IGNORECASE):
+                if src.startswith('http'):
+                    image_url = src
+                elif src.startswith('//'):
+                    image_url = f"https:{src}"
+                elif src.startswith('/'):
+                    image_url = f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": page_url,
+            "date": date or datetime.min,
+            "summary": "",
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[NVIDIA GEAR] Scraped {len(posts)} posts from project pages")
+    return posts
+
+
+def scrape_x_square(source):
+    """
+    X Square Robot (x2robot.com) is a Next.js App Router site, but the news
+    list is server-side rendered into the HTML. Each post is an <a> card with a
+    "border-b" class linking to /news/<id>; the title is an <h3>, the date a
+    div.text-gray-500 (YYYY-MM-DD), the teaser a <p>, and the image an <img>
+    (often a /_next/image?url=... proxy). English post URLs are /en/news/<id>.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    for card in soup.find_all('a', href=re.compile(r'/news/[0-9a-f]{6,}')):
+        href = card.get('href', '')
+        h3 = card.find('h3')
+        if not h3:
+            continue
+        title = h3.get_text(strip=True)
+        if not title:
+            continue
+
+        slug = href.rstrip('/').split('/news/')[-1]
+        url = f"{base_url}/en/news/{slug}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        date = None
+        date_el = card.find('div', class_=lambda c: c and 'text-gray-500' in c)
+        if date_el:
+            date = safe_parse_date(date_el.get_text(strip=True), ['%Y-%m-%d'])
+
+        summary = ""
+        p = card.find('p')
+        if p:
+            summary = p.get_text(strip=True)
+
+        image_url = None
+        img = card.find('img')
+        if img:
+            src = img.get('src', '')
+            if src.startswith('http'):
+                image_url = src
+            elif src.startswith('/'):
+                image_url = f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[X Square Robot] Scraped {len(posts)} posts")
+    return posts
+
+
+def scrape_sanctuary_ai(source):
+    """
+    Sanctuary AI (sanctuary.ai) runs on Squarespace, which exposes an RSS feed
+    at /blog/rss.xml (source["url"]). Each <item> has title, link, pubDate
+    (RFC 822), an HTML <description>, and a Squarespace <media:content> image.
+    """
+    company = source["name"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'xml')
+
+    posts = []
+    seen_urls = set()
+
+    for item in soup.find_all('item'):
+        title_el = item.find('title')
+        link_el = item.find('link')
+        if not title_el or not link_el:
+            continue
+        title = title_el.get_text(strip=True)
+        url = link_el.get_text(strip=True)
+        if not title or not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        date = None
+        pubdate_el = item.find('pubDate')
+        if pubdate_el:
+            date = safe_parse_date(pubdate_el.get_text(strip=True), ['%a, %d %b %Y %H:%M:%S %z'])
+            if date is not None:
+                date = date.replace(tzinfo=None)
+
+        summary = ""
+        desc_el = item.find('description')
+        if desc_el:
+            summary = BeautifulSoup(desc_el.get_text(), 'html.parser').get_text(strip=True)
+
+        image = None
+        media = item.find('media:content') or item.find('content')
+        if media and media.get('url'):
+            image = media.get('url')
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image,
+            "company": company,
+        })
+
+    logger.info(f"[Sanctuary AI] Scraped {len(posts)} posts from RSS feed")
+    return posts
+
+
+def scrape_boston_dynamics(source):
+    """
+    Boston Dynamics (bostondynamics.com) is WordPress, but its blog feed is
+    empty; the blog listing is server-rendered instead. Each card is an
+    <article class="PostAjaxFilter-card"> with a .PostAjaxFilter-card-title, a
+    first <a> linking to /blog/<slug>/, and a .PostAjaxFilter-card-image whose
+    CSS background-image holds the thumbnail URL. The listing exposes no dates.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    for card in soup.find_all('article', class_='PostAjaxFilter-card'):
+        title_el = card.find(class_='PostAjaxFilter-card-title')
+        link = card.find('a', href=re.compile(r'/blog/[a-z0-9\-]+'))
+        if not title_el or not link:
+            continue
+        title = title_el.get_text(strip=True)
+        if not title:
+            continue
+
+        href = link.get('href', '')
+        url = href if href.startswith('http') else f"{base_url}{href}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        image_url = None
+        img_div = card.find(class_='PostAjaxFilter-card-image')
+        if img_div:
+            style = img_div.get('style', '')
+            bg = re.search(r'url\([\'"]?([^\'")]+)[\'"]?\)', style)
+            if bg:
+                src = bg.group(1)
+                image_url = src if src.startswith('http') else f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": datetime.min,
+            "summary": "",
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[Boston Dynamics] Scraped {len(posts)} posts")
+    return posts
+
+
+def scrape_nvidia_cosmos(source):
+    """
+    NVIDIA Cosmos Lab (research.nvidia.com/labs/cosmos-lab) renders its
+    publication list client-side (empty in SSR HTML), but the product showcase
+    is server-rendered as <div class="product-card"> entries with an
+    a.product-media[href] link, an h3.product-name and a p.product-desc.
+    Card media is <video>, so no still image is captured (placeholder is used).
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    for card in soup.find_all(class_='product-card'):
+        name_el = card.find(class_='product-name')
+        link = card.find('a', href=True)
+        if not name_el or not link:
+            continue
+        title = name_el.get_text(strip=True)
+        if not title:
+            continue
+
+        href = link.get('href', '')
+        if href.startswith('http'):
+            url = href
+        elif href.startswith('/'):
+            url = f"{base_url}{href}"
+        else:
+            url = f"{base_url}/labs/cosmos-lab/{href}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        desc_el = card.find(class_='product-desc')
+        summary = desc_el.get_text(strip=True) if desc_el else ""
+
+        image_url = None
+        img = card.find('img')
+        if img:
+            src = img.get('src', '')
+            if re.search(r'\.(png|jpe?g|webp|gif|svg)(\?|$)', src, re.IGNORECASE):
+                image_url = src if src.startswith('http') else f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": datetime.min,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[NVIDIA Cosmos Lab] Scraped {len(posts)} posts")
+    return posts
+
+
+def scrape_agile_robots(source):
+    """
+    Agile Robots (agile-robots.com) runs on TYPO3 with server-rendered news.
+    Each card is a div.article-list-teaser-element containing an h3.title, a
+    <time> element (datetime attr is ISO; visible text is DD.MM.YYYY), an
+    enclosing <a> link, and an <img>. Links and images are relative and need
+    the base URL prepended. The listing has no teaser summary text.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    for card in soup.find_all('div', class_='article-list-teaser-element'):
+        title_el = card.find('h3', class_='title') or card.find(['h2', 'h3'])
+        if not title_el:
+            continue
+        title = title_el.get_text(strip=True)
+        if not title:
+            continue
+
+        link = card.find('a', href=True)
+        if not link:
+            continue
+        href = link.get('href', '')
+        url = href if href.startswith('http') else f"{base_url}{href}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        date = None
+        time_el = card.find('time')
+        if time_el:
+            iso = time_el.get('datetime', '')
+            date = safe_parse_date(iso[:10], ['%Y-%m-%d']) if iso else None
+            if not date:
+                date = safe_parse_date(time_el.get_text(strip=True), ['%d.%m.%Y'])
+
+        image_url = None
+        img = card.find('img')
+        if img:
+            src = img.get('src') or img.get('data-src') or ''
+            if src.startswith('http'):
+                image_url = src
+            elif src.startswith('/'):
+                image_url = f"{base_url}{src}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": "",
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[Agile Robots] Scraped {len(posts)} posts")
+    return posts
+
+
+def scrape_dexforce(source):
+    """
+    DexForce (dexforce.com/core.html) is a static product/technology page. It
+    has no press-news list, but its "Latest Research" (最新研究) section is
+    server-rendered as div.core-report entries with a .report-title heading, a
+    descriptive <p>, and a link to the technical report. No dates or images.
+    """
+    company = source["name"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    for report in soup.find_all(class_='core-report'):
+        title_el = report.find(class_='report-title')
+        if not title_el:
+            continue
+        title = title_el.get_text(strip=True)
+        if not title:
+            continue
+
+        link = report.find('a', href=True)
+        url = link.get('href', '').strip() if link else source["url"]
+        if not url:
+            url = source["url"]
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        summary = ""
+        for p in report.find_all('p'):
+            text = p.get_text(strip=True)
+            if text and text != title:
+                summary = text
+                break
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": datetime.min,
+            "summary": summary,
+            "image": None,
+            "company": company,
+        })
+
+    logger.info(f"[DexForce] Scraped {len(posts)} posts")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -1432,6 +2303,18 @@ SCRAPERS = {
     "Genesis AI": scrape_genesis_ai,
     "Ropedia": scrape_ropedia,
     "OneRobotics": scrape_onerobot,
+    "Galaxea": scrape_galaxea,
+    "Spirit AI": scrape_spirit_ai,
+    "Xiaomi Robotics": scrape_xiaomi_robotics,
+    "ByteDance Seed": scrape_bytedance_seed,
+    "NVIDIA Blog": scrape_nvidia_blog,
+    "NVIDIA GEAR": scrape_nvidia_gear,
+    "X Square Robot": scrape_x_square,
+    "Sanctuary AI": scrape_sanctuary_ai,
+    "Boston Dynamics": scrape_boston_dynamics,
+    "NVIDIA Cosmos Lab": scrape_nvidia_cosmos,
+    "Agile Robots": scrape_agile_robots,
+    "DexForce": scrape_dexforce,
 }
 
 
@@ -1562,6 +2445,64 @@ FALLBACK_DATA = {
         ("OneRobotics Launches Embodied Intelligence Chain with First Post-IPO Strategic Investment", "https://www.onerobot.com/news/20", datetime(2026, 4, 14), "", "https://www.onerobot.com/uploads/upload/images/20260506/52fc740c09223022840bff25cf62e938.png"),
         ("Defining a new paradigm for home embodied intelligence: OneRobotics AI Hub becomes the world's first local home AI agent officially supporting OpenClaw", "https://www.onerobot.com/news/19", datetime(2026, 2, 11), "", "https://www.onerobot.com/uploads/upload/images/20260211/046d9aeb0dc591af2dc1983f14665fa6.jpg"),
     ],
+    "Galaxea": [
+        ("Introducing G0.5: One Autoregressive Stream for Reasoning and Action", "https://opengalaxea.github.io/G05/", datetime(2026, 5, 31), "A pretrained autoregressive Vision-Language-Action model in which a single transformer decoder emits both reasoning and action tokens under one objective - keeping the VLM the decision-maker, not just a context encoder.", None),
+    ],
+    "Spirit AI": [
+        ("Spirit-v1.5: Clean Data Is the Enemy of Great Robot Foundation Models", "https://www.spirit-ai.com/en/blog/spirit-v1-5", datetime(2026, 1, 11), "We advocate for a shift toward diverse and largely uncontrolled data for robot pretraining. Spirit-v1.5 achieves SoTA generalization by training on diverse, uncurated data rather than highly curated clean datasets.", "https://www.spirit-ai.com/blog/images/blogs/spirit-v1-5/cover.jpg"),
+    ],
+    "Xiaomi Robotics": [
+        ("Open-Sourcing Post-Training Pipeline for Xiaomi-Robotics-0", "https://robotics.xiaomi.com/xiaomi-robotics-0.html#pack-earbuds", datetime(2026, 4, 27), "Xiaomi-Robotics-0 achieves precise earbud-to-case insertion using just 20 hours of post-training data. We open-source the full post-training pipeline.", "https://robotics.xiaomi.com/robot-static-resource/xiaomi-robotics-0/post-training.png"),
+        ("Xiaomi-Robotics-0: An Open-Sourced Vision-Language-Action Model with Real-Time Execution", "https://robotics.xiaomi.com/xiaomi-robotics-0.html", datetime(2026, 2, 12), "Xiaomi-Robotics-0 is an advanced Vision-Language-Action (VLA) model optimized for high performance and real-time execution.", "https://robotics.xiaomi.com/robot-static-resource/xiaomi-robotics-0/xiaomi-robotics-0.png"),
+    ],
+    "ByteDance Seed": [
+        ("GR-RL: Going Dexterous and Precise for Long-Horizon Robotic Manipulation", "https://arxiv.org/abs/2512.01801", datetime(2025, 12, 2), "[arXiv] We present GR-RL, a robotic learning framework that turns a generalist vision-language-action (VLA) policy into a highly capable specialist for long-horizon dexterous manipulation.", None),
+        ("GR-3 Technical Report", "https://arxiv.org/pdf/2507.15493", datetime(2025, 7, 21), "[arXiv] We report our recent progress towards building generalist robot policies, the development of GR-3, a large-scale vision-language-action (VLA) model.", None),
+        ("Dexterous Teleoperation of 20-DoF ByteDexter Hand via Human Motion Retargeting", "https://arxiv.org/abs/2507.03227", datetime(2025, 7, 4), "[arXiv] Replicating human-level dexterity remains a fundamental robotics challenge, requiring integrated solutions from mechatronic design to the control of high degree-of-freedom robotic hands.", None),
+    ],
+    "NVIDIA Blog": [
+        ("NVIDIA Jetson Brings Agentic AI to the Physical World", "https://blogs.nvidia.com/blog/jetson-agentic-ai-physical-world/", datetime(2026, 6, 2), "At COMPUTEX, NVIDIA announced NVIDIA JetPack 7.2 and NemoClaw support on NVIDIA Jetson, bringing agentic AI skills to the physical world.", "https://blogs.nvidia.com/wp-content/uploads/2026/06/robotics-press-jetson-agentic-ready-cptx26-1920x1080-5180550.jpg"),
+        ("NVIDIA Factory Operations Blueprint Gives Factories a New AI Brain", "https://blogs.nvidia.com/blog/factory-operations-fox-blueprint-ai-brain/", datetime(2026, 6, 1), "NVIDIA announced the Factory Operations Blueprint (FOX), a reference design for building an autonomous factory manager that unifies live machine signals into a decision layer.", "https://blogs.nvidia.com/wp-content/uploads/2026/05/robotics-factory-ai-computer-1280x680-5259650.jpg"),
+        ("How Cosmos 3 Helps Physical AI Think Before It Acts", "https://blogs.nvidia.com/blog/cosmos-3-physical-ai-open-world-foundation-model/", datetime(2026, 6, 1), "Cosmos 3 is an open-world foundation model that helps physical AI reason before acting.", "https://blogs.nvidia.com/wp-content/uploads/2026/05/Featured-image.png"),
+        ("NVIDIA Research Advances Robotics From Simulation to the Real World", "https://blogs.nvidia.com/blog/icra-research-robotics-simulation-to-real-world/", datetime(2026, 5, 28), "At ICRA, eight of NVIDIA Research's 28 accepted papers show how simulation-to-real transfer is becoming a foundation for generalizable, reliable embodied autonomy.", "https://blogs.nvidia.com/wp-content/uploads/2026/05/ICRA2026Blog-scaled.jpg"),
+    ],
+    "NVIDIA GEAR": [
+        ("EgoScale", "https://research.nvidia.com/labs/gear/egoscale/", datetime(2026, 2, 19), "Scaling dexterous manipulation with diverse egocentric human data to unlock dexterous robot intelligence.", "https://research.nvidia.com/labs/gear/egoscale/videos/Pipeline.svg"),
+        ("GR00T N1.6", "https://research.nvidia.com/labs/gear/gr00t-n1_6/", datetime(2025, 12, 15), "An improved open foundation model for generalist humanoid robots.", None),
+        ("GR00T N1.5", "https://research.nvidia.com/labs/gear/gr00t-n1_5/", datetime(2025, 6, 11), "An improved open foundation model for generalist humanoid robots.", "https://research.nvidia.com/labs/gear/n1_5/architecture.svg"),
+        ("FLARE", "https://research.nvidia.com/labs/gear/flare/", datetime(2025, 5, 22), "Robot learning with implicit world modeling via Future Latent Representation Alignment.", "https://research.nvidia.com/labs/gear/flare/videos/first_frame.jpg"),
+        ("DreamGen", "https://research.nvidia.com/labs/gear/dreamgen/", datetime(2025, 5, 20), "Unlocking generalization in robot learning through video world models.", None),
+    ],
+    "X Square Robot": [
+        ("X Square Robot Open-Sources WALL-WM, Shifting Robot World Modeling From Chunks to Events", "https://x2robot.com/en/news/6a195a10c0b46f559b2048af", datetime(2026, 5, 29), "X Square Robot open-sources WALL-WM, shifting robot world modeling from chunks to events.", None),
+        ("X Square Robot Open-Sources Wall-OSS-0.5, Bringing Pretrained VLA Performance Closer to Post-Training Levels", "https://x2robot.com/en/news/6a17d057f182b06d9911e0a8", datetime(2026, 5, 28), "Wall-OSS-0.5 is a Vision-Language-Action (VLA) model designed for real-world robotic manipulation.", None),
+        ("X Square Robot Named to Forbes China 2026 AI Tech Enterprises Top 50", "https://x2robot.com/en/news/6a0aaeb60ce54dd6a875e494", datetime(2026, 5, 18), "Forbes China recognized X Square Robot among China's top AI technology enterprises in the Embodied AI track.", None),
+        ("X Square Robot Unveils New Embodied AI Model, Says Robots Will Arrive in Homes in 35 Days", "https://x2robot.com/en/news/69f3112631fe0538d4646e28", datetime(2026, 4, 21), "X Square Robot unveiled a next-generation embodied AI foundation model for home robots.", None),
+        ("X Square Robot Hosts Inaugural EAIDC 2026, Advancing Real-World Deployment of Embodied AI", "https://x2robot.com/en/news/69f310b231fe0538d4646c1c", datetime(2026, 4, 2), "X Square Robot concluded the world's first Embodied AI Developers Conference (EAIDC 2026).", None),
+    ],
+    "Sanctuary AI": [
+        ("Zeon Invests in Sanctuary AI and Partners to Advance Special Materials for Robotics", "https://www.sanctuary.ai/blog/zeon-sanctuary-ai-announcement", datetime(2026, 5, 26), "Zeon and Sanctuary AI will collaborate on rugged elastomeric components for robotics.", "https://images.squarespace-cdn.com/content/v1/66e8617ff9cbf43e43b040ef/1779752388791-1XYS8BOKNZV9VYK6JNZ4/Zeon+x+Sanctuary+Logo+Lockup.png?format=1500w"),
+        ("Web Summit Reflections: Canada's Physical AI Moment Can't Wait", "https://www.sanctuary.ai/blog/web-summit-vancouver-2026", datetime(2026, 5, 20), "Reflections on Canada's Physical AI moment from Web Summit Vancouver 2026.", "https://images.squarespace-cdn.com/content/v1/66e8617ff9cbf43e43b040ef/1779217114733-2E8HVW0SIZVBFGC1INMZ/Frame+1000006202.png?format=1500w"),
+        ("Sanctuary AI Demonstrates Zero-Shot In-Hand Manipulation on a Letter Cube", "https://www.sanctuary.ai/blog/in-hand-reorientation-policy-with-letter-cube", datetime(2026, 4, 1), "Sanctuary AI's proprietary hydraulic hand autonomously manipulates a letter cube with a zero-shot reorientation policy.", "https://images.squarespace-cdn.com/content/v1/66e8617ff9cbf43e43b040ef/1775060588888-2IQEF3SF3T05JICJ3YI8/Thumbnail-Cube-Reorientation-Policy-Still.png?format=1500w"),
+    ],
+    "Boston Dynamics": [
+        ("Training a Humanoid Robot for Hard Work", "https://bostondynamics.com/blog/training-a-humanoid-robot-for-hard-work/", datetime.min, "How Boston Dynamics trains the Atlas humanoid robot for demanding real-world tasks.", "https://bostondynamics.com/wp-content/uploads/2026/05/training-fridge-tech-blog.jpg"),
+        ("AIVI Learning Now Powered by Google Gemini Robotics", "https://bostondynamics.com/blog/aivi-learning-now-powered-google-gemini-robotics/", datetime.min, "Boston Dynamics' AIVI learning is now powered by Google Gemini Robotics.", None),
+        ("Boston Dynamics and Google DeepMind Form New AI Partnership", "https://bostondynamics.com/blog/boston-dynamics-google-deepmind-form-new-ai-partnership/", datetime.min, "Boston Dynamics and Google DeepMind form a new partnership to advance robot AI.", None),
+    ],
+    "NVIDIA Cosmos Lab": [
+        ("Cosmos 3", "https://research.nvidia.com/labs/cosmos-lab/cosmos3/", datetime.min, "A family of omnimodal world models designed to jointly process and generate language, image, video, audio, and action sequences.", None),
+    ],
+    "Agile Robots": [
+        ("Simulating worlds: Agile Robots early access to NVIDIA Cosmos 3", "https://www.agile-robots.com/en/news/detail/simulating-worlds-agile-robots-early-access-to-nvidia-cosmos-3/", datetime(2026, 6, 1), "Agile Robots gains early access to NVIDIA Cosmos 3 for simulating worlds.", "https://www.agile-robots.com/media/_processed_/9/a/csm_AgileRobots-Blog-Data-Farm_cfab32960b.jpg"),
+        ("Humanoid Agile ONE embodies Physical AI at Hannover Messe 2026", "https://www.agile-robots.com/en/news/detail/humanoid-agile-one-embodies-physical-ai-at-hannover-messe-2026/", datetime(2026, 4, 20), "The humanoid Agile ONE embodies Physical AI at Hannover Messe 2026.", "https://www.agile-robots.com/media/_processed_/6/e/csm_HMI_Messetag-1_2d3eab3dfc.jpg"),
+        ("Agile Robots and Google DeepMind partner to bring intelligence to robotics", "https://www.agile-robots.com/en/news/detail/agile-robots-and-google-deepmind-partner-to-bring-intelligence-to-robotics/", datetime(2026, 3, 24), "Agile Robots and Google DeepMind partner to bring intelligence to robotics.", "https://www.agile-robots.com/media/_processed_/0/7/csm_AgileRobots_GDM_Partner_3d75d06884.jpg"),
+        ("Physical AI - Digital intelligence, physical results", "https://www.agile-robots.com/en/news/detail/physical-ai-digital-intelligence-physical-results/", datetime(2026, 2, 10), "Physical AI: digital intelligence delivering physical results.", "https://www.agile-robots.com/media/_processed_/2/c/csm_AgileRobots-Blog-Physical-AI-009_9bc1c70fd4.jpeg"),
+    ],
+    "DexForce": [
+        ("DexWorldModel: Causal Latent World Modeling towards Automated Learning of Embodied Tasks", "https://dexforce.com/technical-report/#/DexWorldModel", datetime.min, "DexWorldModel: causal latent world modeling towards automated learning of embodied tasks.", None),
+        ("EmbodiChain", "https://dexforce.com/technical-report/#/EmbodiChain", datetime.min, "EmbodiChain: an automated, modular embodied intelligence platform to scale training and accelerate embodied AI learning.", None),
+    ],
 }
 
 
@@ -1631,10 +2572,11 @@ def get_all_posts(force_refresh=False):
             source = futures[future]
             try:
                 posts = future.result()
-                # Add placeholder SVGs for posts without images
+                # Add placeholder SVGs for posts without images, compress summaries
                 for post in posts:
                     if not post.get("image"):
                         post["image"] = generate_placeholder_svg(post["title"], post["company"])
+                    post["summary"] = compress_summary(post.get("summary", ""))
                 all_posts.extend(posts)
             except Exception as e:
                 logger.error(f"[{source['name']}] Future failed: {type(e).__name__}: {e}")
@@ -1684,7 +2626,8 @@ def get_by_company_dedup():
 
         by_company_dedup[company] = list(seen.values())
 
-    return by_company_dedup
+    # Order the company view alphabetically (A-Z) by company name.
+    return {name: by_company_dedup[name] for name in sorted(by_company_dedup, key=str.lower)}
 
 
 # =============================================================================

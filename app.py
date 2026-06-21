@@ -70,6 +70,7 @@ BLOG_SOURCES = [
     {"name": "NVIDIA Cosmos Lab", "url": "https://research.nvidia.com/labs/cosmos-lab/", "base_url": "https://research.nvidia.com", "color": "#4ade80"},
     {"name": "Agile Robots", "url": "https://www.agile-robots.com/en/news/", "base_url": "https://www.agile-robots.com", "color": "#e11d48"},
     {"name": "DexForce", "url": "https://www.dexforce.com/core.html", "base_url": "https://www.dexforce.com", "color": "#f97316"},
+    {"name": "RL2 @ Georgia Tech", "url": "https://rl2.cc.gatech.edu/publications.json", "base_url": "https://rl2.cc.gatech.edu", "color": "#b3a369"},
 ]
 
 # Display companies alphabetically (A-Z) by name.
@@ -2282,6 +2283,98 @@ def scrape_dexforce(source):
     return posts
 
 
+def scrape_rl2_gatech(source):
+    """
+    RL2 (Robot Learning and Reasoning Lab) at Georgia Tech is a static site
+    that loads its publication list from /publications.json via client-side
+    fetch. Each entry has: title, authors, venue, abstract, optional awards,
+    a thumbnail (image or video URL relative to /assets/), and a links dict
+    with paper/website/code/video keys.
+
+    Notes:
+    - The venue string ("RSS 2026", "CoRL 2025", "Robotics and Automation
+      Letters (RA-L) 2022") contains the only date signal. We extract the
+      4-digit year and pin the date to January 1 of that year - guessing
+      conference months would be brittle. Year ordering is what the UI
+      actually uses for sort, so this preserves correct chronology.
+    - Each post URL prefers links.website, then links.paper, then the lab
+      homepage. The lab's own SPA has no per-publication anchor.
+    - Thumbnails come from /assets/<filename>. Videos cannot render in the
+      UI's <img> tag (see scrape_nvidia_gear for the same constraint), so
+      we only use image thumbnails and let video entries fall back to the
+      generated SVG placeholder.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    homepage = base_url + "/"
+    response = make_request(source["url"])
+    data = response.json()
+
+    posts = []
+    seen_urls = set()
+    for pub in data.get('publications', []):
+        title = (pub.get('title') or '').strip()
+        if not title:
+            continue
+
+        links = pub.get('links') or {}
+        url = links.get('website') or links.get('paper') or homepage
+        if url.startswith('/'):
+            url = base_url + url
+
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # Extract a 4-digit year (1990-2099) from the venue string; some
+        # entries (e.g. older RA-L papers) only have the year inside the
+        # awards text, so fall back to scanning those before giving up.
+        venue = (pub.get('venue') or '').strip()
+        awards = pub.get('awards') or []
+        date = datetime.min
+        year_match = re.search(r'\b(19[9]\d|20\d{2})\b', venue)
+        if not year_match:
+            for award in awards:
+                year_match = re.search(r'\b(19[9]\d|20\d{2})\b', award)
+                if year_match:
+                    break
+        if year_match:
+            date = datetime(int(year_match.group(1)), 1, 1)
+
+        # Summary: "[Venue] Abstract" with awards appended in brackets.
+        abstract = (pub.get('abstract') or '').strip()
+        summary_parts = []
+        if venue:
+            summary_parts.append(f"[{venue}]")
+        if abstract:
+            summary_parts.append(abstract)
+        if awards:
+            summary_parts.append(f"({', '.join(awards)})")
+        summary = ' '.join(summary_parts)
+
+        # Image thumbnails only; videos can't render in the UI's <img>.
+        image_url = None
+        thumb = pub.get('thumbnail') or {}
+        if thumb.get('type') == 'image' and thumb.get('url'):
+            thumb_path = thumb['url']
+            if thumb_path.startswith('http'):
+                image_url = thumb_path
+            else:
+                image_url = f"{base_url}/assets/{thumb_path.lstrip('/')}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[RL2 @ Georgia Tech] Scraped {len(posts)} publications from publications.json")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -2315,6 +2408,7 @@ SCRAPERS = {
     "NVIDIA Cosmos Lab": scrape_nvidia_cosmos,
     "Agile Robots": scrape_agile_robots,
     "DexForce": scrape_dexforce,
+    "RL2 @ Georgia Tech": scrape_rl2_gatech,
 }
 
 
@@ -2502,6 +2596,19 @@ FALLBACK_DATA = {
     "DexForce": [
         ("DexWorldModel: Causal Latent World Modeling towards Automated Learning of Embodied Tasks", "https://dexforce.com/technical-report/#/DexWorldModel", datetime.min, "DexWorldModel: causal latent world modeling towards automated learning of embodied tasks.", None),
         ("EmbodiChain", "https://dexforce.com/technical-report/#/EmbodiChain", datetime.min, "EmbodiChain: an automated, modular embodied intelligence platform to scale training and accelerate embodied AI learning.", None),
+    ],
+    "RL2 @ Georgia Tech": [
+        ("KinDER: A Physical Reasoning Benchmark for Robot Learning and Planning", "https://prpl-group.com/kinder-site/", datetime(2026, 1, 1), "[RSS 2026] A benchmark for Kinematic and Dynamic Embodied Reasoning that targets physical reasoning challenges arising in robot learning and planning.", "https://rl2.cc.gatech.edu/assets/kinder_huang2026.png"),
+        ("ReSteer: Quantifying and Refining the Steerability of Multitask Robot Policies", "https://resteer-vla.github.io/", datetime(2026, 1, 1), "[RSS 2026] A data-centric framework to quantify and improve the task steerability of multitask robot policies.", "https://rl2.cc.gatech.edu/assets/resteer_chen2026.png"),
+        ("EgoVerse: An Egocentric Human Dataset for Robot Learning from Around the World", "https://egoverse.ai/", datetime(2026, 1, 1), "[RSS 2026] A consortium-driven cross-lab effort introducing a large-scale 1300+ hour diverse egocentric human dataset for robot learning.", None),
+        ("Compositional Diffusion with Guided Search for Long-Horizon Planning", "https://cdgsearch.github.io/", datetime(2026, 1, 1), "[ICLR 2026] Inference time scaling of compositional diffusion planners with guided search. (Oral)", "https://rl2.cc.gatech.edu/assets/cdgs_mishra2026.png"),
+        ("Compositional Visual Planning via Inference-Time Diffusion Scaling", "https://comp-visual-planning.github.io/", datetime(2026, 1, 1), "[ICLR 2026] An inference-time compositional sampling approach that scales to unseen and long-horizon tasks.", "https://rl2.cc.gatech.edu/assets/cvp_yixin2026.png"),
+        ("EMMA: Scaling Mobile Manipulation via Egocentric Human Data", "https://ego-moma.github.io/", datetime(2025, 1, 1), "[IEEE RA-L 2025] Scaling mobile manipulation from co-training static robot data and egocentric human full-body data.", None),
+        ("Generalizable Domain Adaptation for Sim-and-Real Policy Co-Training", "https://ot-sim2real.github.io/", datetime(2025, 1, 1), "[NeurIPS 2025] A sim-and-real co-training framework for learning generalizable manipulation policies.", "https://rl2.cc.gatech.edu/assets/ot_sim2real.png"),
+        ("EgoBridge: Domain Adaptation for Generalizable Imitation from Egocentric Human Data", "https://ego-bridge.github.io/", datetime(2025, 1, 1), "[NeurIPS 2025] Joint observation-action domain adaptation using Optimal Transport to enable robot generalization from egocentric human data.", None),
+        ("ImMimic: Cross-Domain Imitation from Human Videos via Mapping and Interpolation", "https://sites.google.com/view/immimic", datetime(2025, 1, 1), "[CoRL 2025] Embodiment-agnostic pipeline to learn from human videos. (Oral Presentation)", "https://rl2.cc.gatech.edu/assets/immimic.png"),
+        ("SAIL: Faster-than-Demonstration Execution of Imitation Learning Policies", "https://nadunranawaka1.github.io/sail-policy/", datetime(2025, 1, 1), "[CoRL 2025] System to execute imitation learning policies faster than human demonstrations. (Oral Presentation)", "https://rl2.cc.gatech.edu/assets/sail.png"),
+        ("EgoMimic: Scaling Imitation Learning through Egocentric Video", "https://egomimic.github.io/", datetime(2025, 1, 1), "[ICRA 2025] Robot Learning from Egocentric Human Data.", None),
     ],
 }
 

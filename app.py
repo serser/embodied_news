@@ -71,6 +71,7 @@ BLOG_SOURCES = [
     {"name": "Agile Robots", "url": "https://www.agile-robots.com/en/news/", "base_url": "https://www.agile-robots.com", "color": "#e11d48"},
     {"name": "DexForce", "url": "https://www.dexforce.com/core.html", "base_url": "https://www.dexforce.com", "color": "#f97316"},
     {"name": "RL2 @ Georgia Tech", "url": "https://rl2.cc.gatech.edu/publications.json", "base_url": "https://rl2.cc.gatech.edu", "color": "#b3a369"},
+    {"name": "Physical Superintelligence Lab", "url": "https://psi-lab.ai/research.html", "base_url": "https://psi-lab.ai", "color": "#a855f7"},
 ]
 
 # Display companies alphabetically (A-Z) by name.
@@ -2377,6 +2378,107 @@ def scrape_rl2_gatech(source):
     return posts
 
 
+def scrape_psi_lab(source):
+    """
+    Physical Superintelligence Lab (psi-lab.ai) is a static HTML site. The
+    /research.html page is a SPA-like shell whose research list is embedded
+    as a single inline `let publications = [...]` JS array literal (not in a
+    separate fetch). Each object has: name, authors, conference, webpage,
+    paper, code, thumbnail.
+
+    Notes:
+    - The array is a JavaScript object literal with trailing commas, so we
+      have to strip them iteratively before json.loads succeeds. We use a
+      _ROUTER_DATA-style fixed-point regex pass to be safe against the
+      `},\\n            ],` outer-array case.
+    - The conference field ("ICLR 2026", "arXiv 2026", "ICCV 2025 Oral")
+      carries the only date signal. We pull the 4-digit year and pin to
+      January 1 of that year, matching scrape_rl2_gatech's approach.
+    - URL prefers webpage > paper > base research page. arXiv abstract pages
+      are usable directly.
+    - Thumbnails are relative paths under /assets/papers/<file>.png; we
+      prefix base_url. The site only serves still images here.
+    - Summary is "[Conference] Authors" because the inline data has no
+      abstract; authors are the most useful per-paper context available.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    html = response.text
+
+    array_match = re.search(r'let\s+publications\s*=\s*\[(.*?)\];', html, re.DOTALL)
+    if not array_match:
+        logger.warning(f"[Physical Superintelligence Lab] No publications array found, using fallback")
+        return []
+
+    body = array_match.group(1)
+    # Strip trailing commas before } or ] until fixed point (handles nested),
+    # then drop any final comma left dangling at the end of the array body.
+    prev = None
+    while prev != body:
+        prev = body
+        body = re.sub(r',(\s*[}\]])', r'\1', body)
+    body = body.rstrip().rstrip(',').rstrip()
+
+    try:
+        pubs = json.loads('[' + body + ']')
+    except json.JSONDecodeError as e:
+        logger.warning(f"[Physical Superintelligence Lab] JSON parse failed: {e}, using fallback")
+        return []
+
+    posts = []
+    seen_urls = set()
+    for pub in pubs:
+        title = (pub.get('name') or '').strip()
+        if not title:
+            continue
+
+        url = (pub.get('webpage') or pub.get('paper') or source['url']).strip()
+        if url.startswith('/'):
+            url = base_url + url
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # Year is the only date signal in conference strings like "ICLR 2026"
+        # or "arXiv 2026"; pin to Jan 1 of the matched year.
+        conference = (pub.get('conference') or '').strip()
+        date = datetime.min
+        year_match = re.search(r'\b(19[9]\d|20\d{2})\b', conference)
+        if year_match:
+            date = datetime(int(year_match.group(1)), 1, 1)
+
+        authors = (pub.get('authors') or '').strip()
+        summary_parts = []
+        if conference:
+            summary_parts.append(f"[{conference}]")
+        if authors:
+            summary_parts.append(authors)
+        summary = ' '.join(summary_parts)
+
+        image_url = None
+        thumb = (pub.get('thumbnail') or '').strip()
+        if thumb:
+            if thumb.startswith('http'):
+                image_url = thumb
+            elif thumb.startswith('/'):
+                image_url = f"{base_url}{thumb}"
+            else:
+                image_url = f"{base_url}/{thumb}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[Physical Superintelligence Lab] Scraped {len(posts)} publications from inline JS array")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -2411,6 +2513,7 @@ SCRAPERS = {
     "Agile Robots": scrape_agile_robots,
     "DexForce": scrape_dexforce,
     "RL2 @ Georgia Tech": scrape_rl2_gatech,
+    "Physical Superintelligence Lab": scrape_psi_lab,
 }
 
 

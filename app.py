@@ -61,7 +61,7 @@ BLOG_SOURCES = [
     {"name": "Galaxea", "url": "https://opengalaxea.github.io/G05/", "base_url": "https://opengalaxea.github.io/G05", "color": "#7c3aed"},
     {"name": "Spirit AI", "url": "https://www.spirit-ai.com/en/blog/", "base_url": "https://www.spirit-ai.com", "color": "#0ea5e9"},
     {"name": "Xiaomi Robotics", "url": "https://robotics.xiaomi.com/", "base_url": "https://robotics.xiaomi.com", "color": "#ff6900"},
-    {"name": "ByteDance Seed", "url": "https://seed.bytedance.com/en/direction/robotics", "base_url": "https://seed.bytedance.com", "color": "#325ab4"},
+    {"name": "ByteDance Seed", "url": "https://seed.bytedance.com/en/research", "base_url": "https://seed.bytedance.com", "color": "#325ab4"},
     {"name": "NVIDIA Blog", "url": "https://blogs.nvidia.com/blog/category/robotics/feed/", "base_url": "https://blogs.nvidia.com", "color": "#76b900"},
     {"name": "NVIDIA GEAR", "url": "https://research.nvidia.com/labs/gear/", "base_url": "https://research.nvidia.com", "color": "#1a7f37"},
     {"name": "X Square Robot", "url": "https://x2robot.com/en/news", "base_url": "https://x2robot.com", "color": "#0d9488"},
@@ -1694,11 +1694,12 @@ def _extract_js_object(text, start_index):
 
 def scrape_bytedance_seed(source):
     """
-    ByteDance Seed (seed.bytedance.com) is a Modern.js/React app. The robotics
+    ByteDance Seed (seed.bytedance.com) is a Modern.js/React app. The research
     publication list is embedded as JSON in a `window._ROUTER_DATA = {...}`
-    script. Articles live at loaderData["(locale$)/direction/(type)/page"]
+    script. Articles live at loaderData["(locale$)/research/page"]
     ["article_list"], each with ArticleMeta (PublishDate epoch-ms, ExternalLinks,
-    Journal, Thumbnail/Cover) and ArticleSubContentEn (Title, Abstract).
+    Journal, Thumbnail/Cover) plus ArticleSubContentZh and ArticleSubContentEn
+    (each with Title, Abstract). Prefer En when populated and fall back to Zh.
     Publication links point to external destinations (mostly arXiv).
     """
     company = source["name"]
@@ -1732,9 +1733,10 @@ def scrape_bytedance_seed(source):
     seen_urls = set()
     for article in article_list:
         meta = article.get('ArticleMeta', {})
-        content = article.get('ArticleSubContentEn') or {}
+        zh_content = article.get('ArticleSubContentZh') or {}
+        en_content = article.get('ArticleSubContentEn') or {}
 
-        title = (content.get('Title') or '').strip()
+        title = (en_content.get('Title') or zh_content.get('Title') or '').strip()
         if not title:
             continue
 
@@ -1757,7 +1759,7 @@ def scrape_bytedance_seed(source):
         if isinstance(publish_ms, (int, float)) and publish_ms > 0:
             date = datetime.fromtimestamp(publish_ms / 1000)
 
-        summary = (content.get('Abstract') or '').strip()
+        summary = (en_content.get('Abstract') or zh_content.get('Abstract') or '').strip()
         journal = (meta.get('Journal') or '').strip()
         if journal:
             summary = f"[{journal}] {summary}" if summary else journal

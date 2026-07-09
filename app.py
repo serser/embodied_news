@@ -72,6 +72,7 @@ BLOG_SOURCES = [
     {"name": "DexForce", "url": "https://www.dexforce.com/core.html", "base_url": "https://www.dexforce.com", "color": "#f97316"},
     {"name": "RL2 @ Georgia Tech", "url": "https://rl2.cc.gatech.edu/publications.json", "base_url": "https://rl2.cc.gatech.edu", "color": "#b3a369"},
     {"name": "Physical Superintelligence Lab", "url": "https://psi-lab.ai/research.html", "base_url": "https://psi-lab.ai", "color": "#a855f7"},
+    {"name": "Dexmal", "url": "https://www.dexmal.com/research", "base_url": "https://www.dexmal.com", "color": "#00c8b4"},
 ]
 
 # Display companies alphabetically (A-Z) by name.
@@ -2479,6 +2480,149 @@ def scrape_psi_lab(source):
     return posts
 
 
+def scrape_dexmal(source):
+    """
+    Dexmal (dexmal.com) is a Vue 3 SPA. The /research route renders nothing
+    server-side - the initial HTML is just an app shell that loads
+    /assets/index-<hash>.js. That bundle contains BOTH:
+      1. A `Km = {...}` object literal mapping semantic keys like
+         `researchRealtimeVlaFlash` to arXiv URLs.
+      2. An `articles:[{date, title, description, href, pinned}, ...]` array
+         embedded in the i18n messages. `href` fields reference the Km map
+         (e.g. `Km.researchRealtimeVlaFlash`), so we must resolve them after
+         extraction.
+
+    Notes:
+    - Bundle filename is content-hashed, so we scrape the current hash from
+      the shell HTML via a `src="/assets/index-<hash>.js"` regex on each call
+      instead of hardcoding it.
+    - Dates are formatted like "13 May 2026" (English) - we parse with
+      '%d %b %Y'. If the site later switches to Chinese-first for the
+      initial locale, that array will be under a zh-CN block; we currently
+      target the English `articles:[...]` occurrence for stability with the
+      rest of the aggregator's English UI.
+    - The Km object literal uses backtick-quoted values; we extract with a
+      permissive regex rather than trying to JSON-parse the whole bundle.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+
+    # Step 1: discover the current hashed bundle filename from the SPA shell.
+    shell = make_request(source["url"]).text
+    bundle_match = re.search(r'src="(/assets/index-[A-Za-z0-9_-]+\.js)"', shell)
+    if not bundle_match:
+        logger.warning(f"[Dexmal] Could not locate index bundle in shell HTML, using fallback")
+        return []
+
+    bundle_url = base_url + bundle_match.group(1)
+    bundle = make_request(bundle_url).text
+
+    # Step 2: build the Km link map. Entries look like `researchFoo:`https://...`,`
+    km_map = {}
+    for key, url in re.findall(r'(research[A-Za-z0-9_]+)\s*:\s*`([^`]+)`', bundle):
+        km_map[key] = url
+
+    # Step 3: locate the English `articles:[...]` array. It's the outermost
+    # array assigned to the `articles` key inside pages.research. Do a bracket
+    # walk from the opening `[` because the entries themselves contain `]`
+    # inside descriptions occasionally.
+    articles_start = bundle.find('articles:[')
+    if articles_start < 0:
+        logger.warning(f"[Dexmal] No articles:[...] block found, using fallback")
+        return []
+
+    i = articles_start + len('articles:')
+    if bundle[i] != '[':
+        logger.warning(f"[Dexmal] Unexpected articles block layout, using fallback")
+        return []
+
+    depth = 0
+    in_backtick = False
+    end = -1
+    for j in range(i, len(bundle)):
+        ch = bundle[j]
+        if ch == '`' and bundle[j - 1] != '\\':
+            in_backtick = not in_backtick
+            continue
+        if in_backtick:
+            continue
+        if ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth -= 1
+            if depth == 0:
+                end = j
+                break
+
+    if end < 0:
+        logger.warning(f"[Dexmal] Could not find end of articles array, using fallback")
+        return []
+
+    articles_body = bundle[i + 1:end]
+
+    # Step 4: pull each `{...}` entry via a bracket walk on the body.
+    entries = []
+    depth = 0
+    in_backtick = False
+    start = -1
+    for j, ch in enumerate(articles_body):
+        if ch == '`' and (j == 0 or articles_body[j - 1] != '\\'):
+            in_backtick = not in_backtick
+            continue
+        if in_backtick:
+            continue
+        if ch == '{':
+            if depth == 0:
+                start = j
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start >= 0:
+                entries.append(articles_body[start:j + 1])
+                start = -1
+
+    posts = []
+    seen_urls = set()
+    for entry in entries:
+        def field(name):
+            m = re.search(rf'\b{name}\s*:\s*`([^`]*)`', entry)
+            return m.group(1) if m else None
+
+        title = (field('title') or '').strip()
+        if not title:
+            continue
+
+        description = (field('description') or '').strip()
+        date_str = (field('date') or '').strip()
+
+        # href references Km, e.g. `href:Km.researchRealtimeVlaFlash`
+        href_match = re.search(r'href\s*:\s*Km\.([A-Za-z0-9_]+)', entry)
+        url = None
+        if href_match:
+            url = km_map.get(href_match.group(1))
+        if not url:
+            # Fallback: sometimes href might be an inline backtick URL.
+            url = field('href') or source['url']
+
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        date = safe_parse_date(date_str, ['%d %b %Y', '%d %B %Y']) or datetime.min
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date,
+            "summary": compress_summary(description),
+            "image": None,
+            "company": company,
+        })
+
+    logger.info(f"[Dexmal] Scraped {len(posts)} research articles from JS bundle")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -2514,6 +2658,7 @@ SCRAPERS = {
     "DexForce": scrape_dexforce,
     "RL2 @ Georgia Tech": scrape_rl2_gatech,
     "Physical Superintelligence Lab": scrape_psi_lab,
+    "Dexmal": scrape_dexmal,
 }
 
 
@@ -2714,6 +2859,15 @@ FALLBACK_DATA = {
         ("ImMimic: Cross-Domain Imitation from Human Videos via Mapping and Interpolation", "https://sites.google.com/view/immimic", datetime(2025, 1, 1), "[CoRL 2025] Embodiment-agnostic pipeline to learn from human videos. (Oral Presentation)", "https://rl2.cc.gatech.edu/assets/immimic.png"),
         ("SAIL: Faster-than-Demonstration Execution of Imitation Learning Policies", "https://nadunranawaka1.github.io/sail-policy/", datetime(2025, 1, 1), "[CoRL 2025] System to execute imitation learning policies faster than human demonstrations. (Oral Presentation)", "https://rl2.cc.gatech.edu/assets/sail.png"),
         ("EgoMimic: Scaling Imitation Learning through Egocentric Video", "https://egomimic.github.io/", datetime(2025, 1, 1), "[ICRA 2025] Robot Learning from Egocentric Human Data.", None),
+    ],
+    "Dexmal": [
+        ("Realtime-VLA V2: Learning to Run VLAs Fast, Smooth, and Accurate", "https://arxiv.org/abs/2603.26360", datetime(2026, 5, 27), "A set of practical techniques to run a VLA-driven robot at impressive speed in real-world tasks requiring both accuracy and dexterity, spanning calibration, planning & control, and learning-based execution speed identification.", None),
+        ("Realtime-VLA FLASH: Speculative Inference Framework for Diffusion-based VLAs", "https://arxiv.org/abs/2605.13778", datetime(2026, 5, 13), "A speculative inference framework that eliminates most full inference calls during replanning via a lightweight draft model with parallel verification and a phase-aware fallback mechanism.", None),
+        ("GS-Playground: A High-Throughput Photorealistic Simulator for Vision-Informed Robot Learning", "https://arxiv.org/abs/2604.25459", datetime(2026, 4, 28), "A multi-modal simulation framework that integrates a novel parallel physics engine with batch 3D Gaussian Splatting rendering, achieving 10^4 FPS at 640x480 to accelerate large-scale visual RL.", None),
+        ("SpatialActor: Exploring Disentangled Spatial Representations for Robust Robotic Manipulation", "https://arxiv.org/abs/2511.09555", datetime(2025, 11, 12), "A disentangled framework that decouples semantics and geometry, using a Semantic-guided Geometric Module and a Spatial Transformer for accurate 2D-3D mapping in robust robotic manipulation.", None),
+        ("Running VLAs at Real-time Speed", "https://arxiv.org/abs/2510.26742", datetime(2025, 10, 30), "How to run a pi0-level multi-view VLA at 30Hz frame rate and up to 480Hz trajectory frequency on a single consumer GPU, enabling dynamic and real-time tasks previously thought unattainable for large VLAs.", None),
+        ("IntentionVLA: Generalizable and Efficient Embodied Intention Reasoning for Human-Robot Interaction", "https://arxiv.org/abs/2510.07778", datetime(2025, 10, 9), "A VLA framework with curriculum training on intention inference, spatial grounding, and compact embodied reasoning, using reasoning outputs as contextual guidance for fast inference under indirect instructions.", None),
+        ("MemoryVLA: Perceptual-Cognitive Memory In Vision-Language-Action Models For Robotic Manipulation", "https://arxiv.org/abs/2508.19236", datetime(2025, 8, 26), "A Cognition-Memory-Action framework for long-horizon manipulation with a Perceptual-Cognitive Memory Bank that stores low-level details and high-level semantics, adaptively fused with current working memory.", None),
     ],
 }
 

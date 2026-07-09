@@ -24,7 +24,7 @@ Routes:
 
 ## Sources
 
-29 sources, displayed alphabetically in the UI. Grouped below by focus
+31 sources, displayed alphabetically in the UI. Grouped below by focus
 area for readability.
 
 ### Foundation models for robotics / robot learning
@@ -37,6 +37,7 @@ area for readability.
 | Genesis AI | https://www.genesis.ai/blog |
 | Sunday Robotics | https://www.sunday.ai/journal |
 | World Labs | https://www.worldlabs.ai/blog |
+| Dexmal | https://www.dexmal.com/research |
 
 ### Humanoid & general-purpose robot companies
 

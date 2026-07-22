@@ -24,7 +24,7 @@ Routes:
 
 ## Sources
 
-31 sources, displayed alphabetically in the UI. Grouped below by focus
+32 sources, displayed alphabetically in the UI. Grouped below by focus
 area for readability.
 
 ### Foundation models for robotics / robot learning
@@ -38,6 +38,7 @@ area for readability.
 | Sunday Robotics | https://www.sunday.ai/journal |
 | World Labs | https://www.worldlabs.ai/blog |
 | Dexmal | https://www.dexmal.com/research |
+| XDOF | https://www.xdof.ai/blog |
 
 ### Humanoid & general-purpose robot companies
 

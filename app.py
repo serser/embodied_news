@@ -73,6 +73,7 @@ BLOG_SOURCES = [
     {"name": "RL2 @ Georgia Tech", "url": "https://rl2.cc.gatech.edu/publications.json", "base_url": "https://rl2.cc.gatech.edu", "color": "#b3a369"},
     {"name": "Physical Superintelligence Lab", "url": "https://psi-lab.ai/research.html", "base_url": "https://psi-lab.ai", "color": "#a855f7"},
     {"name": "Dexmal", "url": "https://www.dexmal.com/research", "base_url": "https://www.dexmal.com", "color": "#00c8b4"},
+    {"name": "XDOF", "url": "https://www.xdof.ai/blog", "base_url": "https://www.xdof.ai", "color": "#6c6db0"},
 ]
 
 # Display companies alphabetically (A-Z) by name.
@@ -2623,6 +2624,75 @@ def scrape_dexmal(source):
     return posts
 
 
+def scrape_xdof(source):
+    """
+    XDOF (xdof.ai) uses Next.js App Router with clean SSR.
+    Blog posts are rendered as <li><a href="/blog/<slug>"> cards inside
+    <ul aria-label="Blog post list">. Each card contains:
+    - Date in a <span> pill (format: "Jun 30, 2026")
+    - Title in <h2>
+    - Excerpt in <p class="text-pretty ...">
+    - Category tag in a second <span> pill (e.g. "research", "releases")
+    No thumbnail images on the listing page.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    posts = []
+    seen_urls = set()
+
+    # Locate the blog post list explicitly to avoid nav links.
+    post_list = soup.find('ul', attrs={'aria-label': 'Blog post list'})
+    candidates = post_list.find_all('a', href=True) if post_list else \
+        soup.find_all('a', href=re.compile(r'^/blog/.+'))
+
+    for a_tag in candidates:
+        href = a_tag.get('href', '')
+        if not href.startswith('/blog/') or href in ('/blog', '/blog/'):
+            continue
+
+        h2 = a_tag.find('h2')
+        if not h2:
+            continue
+        title = h2.get_text(strip=True)
+        if not title or len(title) < 3:
+            continue
+
+        url = f"{base_url}{href}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # Date: first <span> whose text parses as "Mon DD, YYYY".
+        date = None
+        for span in a_tag.find_all('span'):
+            text = span.get_text(strip=True)
+            parsed = safe_parse_date(text, ['%b %d, %Y', '%B %d, %Y'])
+            if parsed:
+                date = parsed
+                break
+
+        # Summary: <p> with the article excerpt (has "text-pretty" class).
+        desc_p = a_tag.find('p', class_=lambda c: c and 'text-pretty' in c)
+        if not desc_p:
+            desc_p = a_tag.find('p')
+        summary = desc_p.get_text(strip=True) if desc_p else ""
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": None,  # No thumbnails on the XDOF listing page
+            "company": company,
+        })
+
+    logger.info(f"[XDOF] Scraped {len(posts)} posts")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -2659,6 +2729,7 @@ SCRAPERS = {
     "RL2 @ Georgia Tech": scrape_rl2_gatech,
     "Physical Superintelligence Lab": scrape_psi_lab,
     "Dexmal": scrape_dexmal,
+    "XDOF": scrape_xdof,
 }
 
 
@@ -2868,6 +2939,12 @@ FALLBACK_DATA = {
         ("Running VLAs at Real-time Speed", "https://arxiv.org/abs/2510.26742", datetime(2025, 10, 30), "How to run a pi0-level multi-view VLA at 30Hz frame rate and up to 480Hz trajectory frequency on a single consumer GPU, enabling dynamic and real-time tasks previously thought unattainable for large VLAs.", None),
         ("IntentionVLA: Generalizable and Efficient Embodied Intention Reasoning for Human-Robot Interaction", "https://arxiv.org/abs/2510.07778", datetime(2025, 10, 9), "A VLA framework with curriculum training on intention inference, spatial grounding, and compact embodied reasoning, using reasoning outputs as contextual guidance for fast inference under indirect instructions.", None),
         ("MemoryVLA: Perceptual-Cognitive Memory In Vision-Language-Action Models For Robotic Manipulation", "https://arxiv.org/abs/2508.19236", datetime(2025, 8, 26), "A Cognition-Memory-Action framework for long-horizon manipulation with a Perceptual-Cognitive Memory Bank that stores low-level details and high-level semantics, adaptively fused with current working memory.", None),
+    ],
+    "XDOF": [
+        ("Lowering the Noise Floor on Robot Data", "https://www.xdof.ai/blog/warp-rm", datetime(2026, 6, 30), "We gave a folding robot more demonstrations and it got worse. Chasing down why led to a way of teaching it to tell productive moments from dead time, with no labels.", None),
+        ("The Robot That Learned to Grade Itself", "https://www.xdof.ai/blog/sarm2", datetime(2026, 6, 23), "Reward models are reshaping how machines learn to manipulate the world. SARM2 can grade dozens of tasks and turn raw demonstrations into policies that keep improving on their own.", None),
+        ("ABC-130K: The largest open source teleoperation dataset", "https://www.xdof.ai/blog/abc-130k", datetime(2026, 6, 17), "130K+ episodes, 200 complex manipulation tasks. All on a low-cost bimanual rig. Fully open source under Apache 2.0.", None),
+        ("Announcing XDOF", "https://www.xdof.ai/blog/announcing-xdof", datetime(2026, 6, 17), "XDOF builds world-class infrastructure for the most ambitious robotics builders. Join us on our mission to unlock abundant, useful embodied AI.", None),
     ],
 }
 

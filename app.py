@@ -74,6 +74,7 @@ BLOG_SOURCES = [
     {"name": "Physical Superintelligence Lab", "url": "https://psi-lab.ai/research.html", "base_url": "https://psi-lab.ai", "color": "#a855f7"},
     {"name": "Dexmal", "url": "https://www.dexmal.com/research", "base_url": "https://www.dexmal.com", "color": "#00c8b4"},
     {"name": "XDOF", "url": "https://www.xdof.ai/blog", "base_url": "https://www.xdof.ai", "color": "#6c6db0"},
+    {"name": "RoboTouch Lab", "url": "https://www.robotouchlab.com/publication/", "base_url": "https://www.robotouchlab.com", "color": "#e84a27"},
 ]
 
 # Display companies alphabetically (A-Z) by name.
@@ -2693,6 +2694,153 @@ def scrape_xdof(source):
     return posts
 
 
+def scrape_robotouch_lab(source):
+    """
+    RoboTouch Lab (robotouchlab.com) is a WordPress site. The /publication/
+    page renders each paper as a `<div class="wp-block-group">` containing a
+    `<div class="wp-block-columns">` with two columns:
+      - Left column: `<figure class="wp-block-image">` with the teaser image
+        (WordPress puts many images behind relative `../wp-content/...`
+        paths in the served HTML - we resolve them against `base_url`).
+      - Right column: a venue `<p class="has-primary-color ...">`
+        (e.g. "IEEE International Conference on Robotics and Automation,
+        2025"), a title `<h5>`, an authors `<p>`, and a `.wp-block-buttons`
+        block with per-paper links (Webpage / ArXiv / PDF / Video / Code).
+
+    Notes:
+    - There are no per-paper dates on the listing; the venue string carries
+      the only date signal. We extract the 4-digit year and pin the date to
+      January 1 of that year - same approach as scrape_rl2_gatech and
+      scrape_psi_lab. Older IJRR-style entries have no year at all, so
+      they fall back to datetime.min.
+    - Each post URL prefers Webpage > ArXiv > PDF > any first button link
+      > the publication page anchor. Video-only links (YouTube) are used
+      last since they don't render a paper page.
+    - Not every group in `.entry-content` is a publication - some are
+      section dividers or intro paragraphs. We require both an `<h5>`
+      title AND at least one button link before treating a group as a
+      paper card.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    entry = soup.find('div', class_='entry-content')
+    if not entry:
+        logger.warning(f"[RoboTouch Lab] No .entry-content found, using fallback")
+        return []
+
+    def resolve_url(u):
+        """Turn relative WordPress paths ('../wp-content/...' or '/foo') into absolute URLs."""
+        if not u:
+            return None
+        u = u.strip()
+        if u.startswith('http://') or u.startswith('https://'):
+            return u
+        if u.startswith('//'):
+            return f"https:{u}"
+        if u.startswith('/'):
+            return f"{base_url}{u}"
+        # Strip any leading ../ segments; the page lives at /publication/
+        # so ../wp-content/... resolves to <base_url>/wp-content/...
+        u = re.sub(r'^(\.\./)+', '', u)
+        return f"{base_url}/{u}"
+
+    # Button link priority - highest first. Video is intentionally last.
+    LINK_PRIORITY = ['webpage', 'project page', 'arxiv', 'paper', 'pdf', 'code', 'github', 'video']
+
+    posts = []
+    seen_urls = set()
+    for group in entry.find_all('div', class_='wp-block-group', recursive=False):
+        h5 = group.find('h5')
+        if not h5:
+            continue
+        # Title text: <h5> may contain <br/> for line breaks; pass a
+        # separator so those don't collapse two words together.
+        title = ' '.join(h5.get_text(separator=' ').split())
+        if not title:
+            continue
+
+        # Collect all buttons in the card in DOM order.
+        button_links = []
+        for btn in group.find_all('a', class_='wp-block-button__link'):
+            href = btn.get('href', '').strip()
+            if not href:
+                continue
+            label = btn.get_text(strip=True).lower()
+            button_links.append((label, href))
+
+        if not button_links:
+            # Not a publication card (probably a section header / intro block).
+            continue
+
+        # Choose URL by label priority; fall back to first button.
+        url = None
+        for pref in LINK_PRIORITY:
+            for label, href in button_links:
+                if pref in label:
+                    url = href
+                    break
+            if url:
+                break
+        if not url:
+            url = button_links[0][1]
+
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        # Venue: <p class="has-primary-color"> above the title.
+        venue = ''
+        venue_p = group.find('p', class_=lambda c: c and 'has-primary-color' in c)
+        if venue_p:
+            venue = venue_p.get_text(strip=True)
+
+        # Year is the only date signal on the listing.
+        date = datetime.min
+        year_match = re.search(r'\b(19[9]\d|20\d{2})\b', venue)
+        if year_match:
+            date = datetime(int(year_match.group(1)), 1, 1)
+
+        # Authors: first <p> that is neither the venue tag nor empty.
+        authors = ''
+        for p in group.find_all('p'):
+            classes = p.get('class') or []
+            if any('has-primary-color' in c for c in classes):
+                continue
+            text = p.get_text(strip=True)
+            if text:
+                authors = text
+                break
+
+        # Summary: "[Venue] Authors".
+        summary_parts = []
+        if venue:
+            summary_parts.append(f"[{venue}]")
+        if authors:
+            summary_parts.append(authors)
+        summary = ' '.join(summary_parts)
+
+        # Image: first <img> in the card, resolved against base_url.
+        image_url = None
+        img = group.find('img')
+        if img:
+            image_url = resolve_url(img.get('src', ''))
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[RoboTouch Lab] Scraped {len(posts)} publications")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -2730,6 +2878,7 @@ SCRAPERS = {
     "Physical Superintelligence Lab": scrape_psi_lab,
     "Dexmal": scrape_dexmal,
     "XDOF": scrape_xdof,
+    "RoboTouch Lab": scrape_robotouch_lab,
 }
 
 
@@ -2945,6 +3094,15 @@ FALLBACK_DATA = {
         ("The Robot That Learned to Grade Itself", "https://www.xdof.ai/blog/sarm2", datetime(2026, 6, 23), "Reward models are reshaping how machines learn to manipulate the world. SARM2 can grade dozens of tasks and turn raw demonstrations into policies that keep improving on their own.", None),
         ("ABC-130K: The largest open source teleoperation dataset", "https://www.xdof.ai/blog/abc-130k", datetime(2026, 6, 17), "130K+ episodes, 200 complex manipulation tasks. All on a low-cost bimanual rig. Fully open source under Apache 2.0.", None),
         ("Announcing XDOF", "https://www.xdof.ai/blog/announcing-xdof", datetime(2026, 6, 17), "XDOF builds world-class infrastructure for the most ambitious robotics builders. Join us on our mission to unlock abundant, useful embodied AI.", None),
+    ],
+    "RoboTouch Lab": [
+        ("PneuGelSight: Soft Robotic Vision-Based Proprioception and Tactile Sensing", "https://rhzhang-ustc.github.io/PneuGelSight-project/", datetime.min, "[The International Journal of Robotics Research] Ruohan Zhang, Uksang Yoo, Yichen Li, Arpit Argawal, Wenzhen Yuan", "https://www.robotouchlab.com/wp-content/uploads/2025/12/social_preview_4_3.png"),
+        ("A Modularized Design Approach for GelSight Family of Vision-based Tactile Sensors", "https://arxiv.org/abs/2504.14739", datetime.min, "[The International Journal of Robotics Research] Arpit Agarwal, Mohammad Amin Mirzaee, Xiping Sun, Wenzhen Yuan", "https://robotouchlab.web.illinois.edu/wp-content/uploads/2025/04/toolbox.jpg"),
+        ("Sensor-Invariant Tactile Representation", "https://hgupt3.github.io/sitr/", datetime(2025, 1, 1), "[ICLR 2025] Harsh Gupta, Yuchen Mo, Shengmiao Jin, Wenzhen Yuan", "https://robotouchlab.web.illinois.edu/wp-content/uploads/2025/03/sitr_website.png"),
+        ("DoorBot: Closed-Loop Task Planning and Manipulation for Door Opening in the Wild with Haptic Feedback", "https://tx-leo.github.io/DoorBot/", datetime(2025, 1, 1), "[ICRA 2025] Zhi Wang, Yuchen Mo, Shengmiao Jin, Wenzhen Yuan", "https://www.robotouchlab.com/wp-content/uploads/2025/06/doorbot_teaser-2000x1499.png"),
+        ("Social Gesture Recognition in SpHRI: Leveraging Fabric-Based Tactile Sensing on Humanoid Robots", "https://dakaraisc.github.io/sphri_gesture_rec/", datetime(2025, 1, 1), "[ICRA 2025] Dakarai Crowder, Kojo Vandyck, Xiping Sun, James McCann, Wenzhen Yuan", "https://robotouchlab.web.illinois.edu/wp-content/uploads/2025/03/teaser_robotsweater_v5_43-2000x1500.png"),
+        ("Vision-Based Tactile Sensor Design Using Physically Based Rendering", "https://www.nature.com/articles/s44172-025-00350-4", datetime(2025, 1, 1), "[Nature Communications Engineering, 2025] Arpit Agarwal, Achu Wilson, Timothy Man, Edward Adelson, Ioannis Gkioulekas, Wenzhen Yuan", "https://robotouchlab.web.illinois.edu/wp-content/uploads/2025/03/vbtsarpit_v2.png"),
+        ("Tactile DreamFusion: Exploiting Tactile Sensing for 3D Generation", "https://ruihangao.github.io/TactileDreamFusion/", datetime(2025, 1, 1), "[NeurIPS 2025] Ruihan Gao, Kangle Deng, Gengshan Yang, Wenzhen Yuan, Jun-Yan Zhu", "https://robotouchlab.web.illinois.edu/wp-content/uploads/2025/03/TactileDreamFusion_teaser_43-2000x1500.png"),
     ],
 }
 

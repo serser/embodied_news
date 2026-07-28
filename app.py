@@ -75,6 +75,7 @@ BLOG_SOURCES = [
     {"name": "Dexmal", "url": "https://www.dexmal.com/research", "base_url": "https://www.dexmal.com", "color": "#00c8b4"},
     {"name": "XDOF", "url": "https://www.xdof.ai/blog", "base_url": "https://www.xdof.ai", "color": "#6c6db0"},
     {"name": "RoboTouch Lab", "url": "https://www.robotouchlab.com/publication/", "base_url": "https://www.robotouchlab.com", "color": "#e84a27"},
+    {"name": "REAL @ Stanford", "url": "https://real.stanford.edu/research.html", "base_url": "https://real.stanford.edu", "color": "#8c1515"},
 ]
 
 # Display companies alphabetically (A-Z) by name.
@@ -2841,6 +2842,148 @@ def scrape_robotouch_lab(source):
     return posts
 
 
+def scrape_real_stanford(source):
+    """
+    REAL @ Stanford (real.stanford.edu / Shuran Song's lab) is a static site
+    that renders its research list from an inline `let publications = [...]`
+    JS array. Same shape as scrape_psi_lab: name, authors, conference,
+    webpage, paper, code, thumbnail, optional note (awards).
+
+    Notes:
+    - The naive `let publications = \\[(.*?)\\];` regex used by psi_lab
+      breaks here because the surrounding <script> block also contains
+      other `];` occurrences (a forEach handler follows the array). We use
+      a string-aware bracket walker to find the matching outer `]` - same
+      technique as scrape_dexmal for its articles:[...] block.
+    - Trailing commas inside the JS array literal are stripped via a
+      fixed-point regex pass before json.loads (same as scrape_psi_lab).
+    - Year is the only date signal in conference strings like
+      "Robotics: Science and Systems 2019 (RSS 2019)" or "arXiv 2026". We
+      pin the date to Jan 1 of the matched year and prefer the LATEST
+      year in the string (some entries list both an initial venue and a
+      journal extension, e.g. "RSS 2019, T-RO 2020").
+    - URL priority: webpage > paper > research page. arXiv PDFs are fine
+      as fallbacks.
+    - Thumbnails are relative paths like `assets/foo.jpg` or `assets/foo.mp4`.
+      The UI's <img> tag can't render video, so we filter to image
+      extensions only (same constraint as scrape_rl2_gatech,
+      scrape_nvidia_gear, scrape_psi_lab).
+    - `note` field carries award text; we append it in parens to the
+      summary, matching scrape_rl2_gatech's award formatting.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    html = response.text
+
+    start = html.find('let publications')
+    if start < 0:
+        logger.warning(f"[REAL @ Stanford] No publications array found, using fallback")
+        return []
+    lb = html.find('[', start)
+    if lb < 0:
+        logger.warning(f"[REAL @ Stanford] Missing opening bracket, using fallback")
+        return []
+
+    depth = 0
+    in_str = False
+    str_ch = ''
+    end = -1
+    i = lb
+    while i < len(html):
+        ch = html[i]
+        if in_str:
+            if ch == '\\':
+                i += 2
+                continue
+            if ch == str_ch:
+                in_str = False
+        else:
+            if ch in ('"', "'"):
+                in_str = True
+                str_ch = ch
+            elif ch == '[':
+                depth += 1
+            elif ch == ']':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        i += 1
+
+    if end < 0:
+        logger.warning(f"[REAL @ Stanford] Could not find end of publications array, using fallback")
+        return []
+
+    body = html[lb + 1:end]
+    prev = None
+    while prev != body:
+        prev = body
+        body = re.sub(r',(\s*[}\]])', r'\1', body)
+    body = body.rstrip().rstrip(',').rstrip()
+
+    try:
+        pubs = json.loads('[' + body + ']')
+    except json.JSONDecodeError as e:
+        logger.warning(f"[REAL @ Stanford] JSON parse failed: {e}, using fallback")
+        return []
+
+    IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg')
+
+    posts = []
+    seen_urls = set()
+    for pub in pubs:
+        title = (pub.get('name') or '').strip()
+        if not title:
+            continue
+
+        url = (pub.get('webpage') or pub.get('paper') or source['url']).strip()
+        if url.startswith('/'):
+            url = base_url + url
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        conference = (pub.get('conference') or '').strip()
+        date = datetime.min
+        years = re.findall(r'\b(19[9]\d|20\d{2})\b', conference)
+        if years:
+            date = datetime(max(int(y) for y in years), 1, 1)
+
+        authors = (pub.get('authors') or '').strip()
+        note = (pub.get('note') or '').strip()
+        summary_parts = []
+        if conference:
+            summary_parts.append(f"[{conference}]")
+        if authors:
+            summary_parts.append(authors)
+        if note:
+            summary_parts.append(f"({note})")
+        summary = ' '.join(summary_parts)
+
+        image_url = None
+        thumb = (pub.get('thumbnail') or '').strip()
+        if thumb and thumb.lower().endswith(IMAGE_EXTS):
+            if thumb.startswith('http'):
+                image_url = thumb
+            elif thumb.startswith('/'):
+                image_url = f"{base_url}{thumb}"
+            else:
+                image_url = f"{base_url}/{thumb}"
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[REAL @ Stanford] Scraped {len(posts)} publications from inline JS array")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -2879,6 +3022,7 @@ SCRAPERS = {
     "Dexmal": scrape_dexmal,
     "XDOF": scrape_xdof,
     "RoboTouch Lab": scrape_robotouch_lab,
+    "REAL @ Stanford": scrape_real_stanford,
 }
 
 
@@ -3103,6 +3247,14 @@ FALLBACK_DATA = {
         ("Social Gesture Recognition in SpHRI: Leveraging Fabric-Based Tactile Sensing on Humanoid Robots", "https://dakaraisc.github.io/sphri_gesture_rec/", datetime(2025, 1, 1), "[ICRA 2025] Dakarai Crowder, Kojo Vandyck, Xiping Sun, James McCann, Wenzhen Yuan", "https://robotouchlab.web.illinois.edu/wp-content/uploads/2025/03/teaser_robotsweater_v5_43-2000x1500.png"),
         ("Vision-Based Tactile Sensor Design Using Physically Based Rendering", "https://www.nature.com/articles/s44172-025-00350-4", datetime(2025, 1, 1), "[Nature Communications Engineering, 2025] Arpit Agarwal, Achu Wilson, Timothy Man, Edward Adelson, Ioannis Gkioulekas, Wenzhen Yuan", "https://robotouchlab.web.illinois.edu/wp-content/uploads/2025/03/vbtsarpit_v2.png"),
         ("Tactile DreamFusion: Exploiting Tactile Sensing for 3D Generation", "https://ruihangao.github.io/TactileDreamFusion/", datetime(2025, 1, 1), "[NeurIPS 2025] Ruihan Gao, Kangle Deng, Gengshan Yang, Wenzhen Yuan, Jun-Yan Zhu", "https://robotouchlab.web.illinois.edu/wp-content/uploads/2025/03/TactileDreamFusion_teaser_43-2000x1500.png"),
+    ],
+    "REAL @ Stanford": [
+        ("Geometry-aware 4D Video Generation for Robot Manipulation", "https://robotgen4d.github.io/", datetime(2026, 1, 1), "[ICLR 2026] Zeyi Liu, Shuang Li, Eric Cousineau, Siyuan Feng, Benjamin Burchfiel, Shuran Song", "https://shurans.github.io/images/projects/4d-gen.png"),
+        ("In-the-Wild Compliant Manipulation with UMI-FT", "https://umi-ft.github.io/", datetime(2026, 1, 1), "[ICRA 2026] Hojung Choi, Yifan Hou, Chuer Pan, Seongheon Hong, Austin Patel, Xiaomeng Xu, Mark Cutkosky, Shuran Song", "https://shurans.github.io/images/projects/UMIFT.png"),
+        ("From Prior to Pro: Efficient Skill Mastery via Distribution Contractive RL Finetuning", "https://zhanyisun.github.io/dice.rl.2026/", datetime(2026, 1, 1), "[ICML 2026] Zhanyi Sun, Shuran Song", "https://shurans.github.io/images/projects/DICE-RL.png"),
+        ("DexMachina: Functional Retargeting for Bimanual Dexterous Manipulation", "https://project-dexmachina.github.io/", datetime(2026, 1, 1), "[ICML 2026] Zhao Mandi, Yifan Hou, Dieter Fox, Yashraj Narang, Ajay Mandlekar, Shuran Song", "https://shurans.github.io/images/projects/DexMachina.png"),
+        ("Minimalist Compliance Control", "https://minimalist-compliance-control.github.io/", datetime(2026, 1, 1), "[RSS 2026] Haochen Shi, Songbo Hu, Yifan Hou, Weizhuo Wang, C. Karen Liu, Shuran Song", None),
+        ("HoMMI: Learning Whole-Body Mobile Manipulation from Human Demonstrations", "https://hommi-robot.github.io/", datetime(2026, 1, 1), "[RSS 2026] Xiaomeng Xu, Jisang Park, Han Zhang, Eric Cousineau, Aditya Bhat, Jose Barreiros, Dian Wang, Jeannette Bohg, Shuran Song", None),
     ],
 }
 

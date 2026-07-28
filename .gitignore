@@ -1,3 +1,10 @@
 __pycache__/
 *.pyc
 .env
+
+# Proxy scripts contain credentials for internal networks - never commit.
+proxy_*.sh
+
+# Local IDE / agent scratch state.
+.sisyphus/
+opencode.json

@@ -24,7 +24,7 @@ Routes:
 
 ## Sources
 
-33 sources, displayed alphabetically in the UI. Grouped below by focus
+34 sources, displayed alphabetically in the UI. Grouped below by focus
 area for readability.
 
 ### Foundation models for robotics / robot learning
@@ -83,6 +83,7 @@ area for readability.
 | --- | --- |
 | RL2 @ Georgia Tech | https://rl2.cc.gatech.edu |
 | RoboTouch Lab | https://www.robotouchlab.com/publication/ |
+| REAL @ Stanford | https://real.stanford.edu/research.html |
 
 ## Adding a new source
 

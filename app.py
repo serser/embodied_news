@@ -2488,24 +2488,30 @@ def scrape_dexmal(source):
     Dexmal (dexmal.com) is a Vue 3 SPA. The /research route renders nothing
     server-side - the initial HTML is just an app shell that loads
     /assets/index-<hash>.js. That bundle contains BOTH:
-      1. A `Km = {...}` object literal mapping semantic keys like
+      1. A links object literal (minified name varies across builds -
+         historically `Km`, currently `Ai`) mapping semantic keys like
          `researchRealtimeVlaFlash` to arXiv URLs.
       2. An `articles:[{date, title, description, href, pinned}, ...]` array
-         embedded in the i18n messages. `href` fields reference the Km map
-         (e.g. `Km.researchRealtimeVlaFlash`), so we must resolve them after
-         extraction.
+         embedded in the i18n messages. `href` fields reference the links
+         object (e.g. `Ai.researchRealtimeVlaFlash`), so we must resolve
+         them after extraction.
 
     Notes:
     - Bundle filename is content-hashed, so we scrape the current hash from
       the shell HTML via a `src="/assets/index-<hash>.js"` regex on each call
       instead of hardcoding it.
+    - The links-object variable name is minified and changes on every build,
+      so we accept any identifier in the `href:<Var>.researchFoo` pattern
+      instead of pinning to a specific name. Otherwise every entry falls
+      through to source['url'] and the seen_urls dedup collapses them to
+      a single post.
     - Dates are formatted like "13 May 2026" (English) - we parse with
       '%d %b %Y'. If the site later switches to Chinese-first for the
       initial locale, that array will be under a zh-CN block; we currently
       target the English `articles:[...]` occurrence for stability with the
       rest of the aggregator's English UI.
-    - The Km object literal uses backtick-quoted values; we extract with a
-      permissive regex rather than trying to JSON-parse the whole bundle.
+    - The links object literal uses backtick-quoted values; we extract with
+      a permissive regex rather than trying to JSON-parse the whole bundle.
     """
     company = source["name"]
     base_url = source["base_url"]
@@ -2520,7 +2526,10 @@ def scrape_dexmal(source):
     bundle_url = base_url + bundle_match.group(1)
     bundle = make_request(bundle_url).text
 
-    # Step 2: build the Km link map. Entries look like `researchFoo:`https://...`,`
+    # Step 2: build the link map. Entries look like `researchFoo:`https://...`,`
+    # The enclosing object gets minified to a short name (`Km` in one build,
+    # `Ai` in another), so we key off the semantic `research*` name and
+    # accept whatever identifier prefixes the `href:` reference below.
     km_map = {}
     for key, url in re.findall(r'(research[A-Za-z0-9_]+)\s*:\s*`([^`]+)`', bundle):
         km_map[key] = url
@@ -2598,8 +2607,10 @@ def scrape_dexmal(source):
         description = (field('description') or '').strip()
         date_str = (field('date') or '').strip()
 
-        # href references Km, e.g. `href:Km.researchRealtimeVlaFlash`
-        href_match = re.search(r'href\s*:\s*Km\.([A-Za-z0-9_]+)', entry)
+        # href references the (minified) links object, e.g.
+        # `href:Ai.researchRealtimeVlaFlash`. Accept any identifier so a
+        # future minifier rename doesn't silently drop URLs.
+        href_match = re.search(r'href\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*\.([A-Za-z0-9_]+)', entry)
         url = None
         if href_match:
             url = km_map.get(href_match.group(1))

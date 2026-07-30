@@ -4,7 +4,7 @@ Embodied AI News Aggregator - Live Scraping with Fallback
 Fetches live data from blog sources, falls back to cached data on failure.
 """
 
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -13,6 +13,8 @@ from urllib.parse import unquote, parse_qs, urlparse
 import threading
 import hashlib
 import base64
+import gzip
+import io
 import json
 import re
 import logging
@@ -90,7 +92,9 @@ COMPANY_COLORS = {s["name"]: s["color"] for s in BLOG_SOURCES}
 cache_lock = threading.RLock()
 cached_posts = []
 cache_timestamp = None
-CACHE_DURATION = 300  # 5 minutes
+CACHE_DURATION = 300  # 5 minutes: cache is "fresh" up to this age
+CACHE_STALE_AFTER = 3600  # 1 hour: cache is "stale but usable" up to this age
+refresh_in_flight = False  # single-flight guard for background revalidation
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -3317,15 +3321,9 @@ def fetch_blog_posts(source):
     return []
 
 
-def get_all_posts(force_refresh=False):
-    """Fetch posts from all sources concurrently, with caching."""
+def _refresh_cache_blocking():
+    """Do the actual scrape+dedup work and populate the module-level cache."""
     global cached_posts, cache_timestamp
-
-    with cache_lock:
-        now = datetime.now()
-        if not force_refresh and cache_timestamp and cached_posts:
-            if (now - cache_timestamp).seconds < CACHE_DURATION:
-                return cached_posts
 
     logger.info("Fetching posts from all sources...")
     all_posts = []
@@ -3336,7 +3334,6 @@ def get_all_posts(force_refresh=False):
             source = futures[future]
             try:
                 posts = future.result()
-                # Add placeholder SVGs for posts without images, compress summaries
                 for post in posts:
                     if not post.get("image"):
                         post["image"] = generate_placeholder_svg(post["title"], post["company"])
@@ -3347,7 +3344,6 @@ def get_all_posts(force_refresh=False):
 
     all_posts.sort(key=lambda x: x["date"], reverse=True)
 
-    # Deduplicate by (title, company)
     seen = set()
     unique_posts = []
     for post in all_posts:
@@ -3362,6 +3358,63 @@ def get_all_posts(force_refresh=False):
 
     logger.info(f"Total: {len(unique_posts)} unique posts from {len(BLOG_SOURCES)} sources")
     return unique_posts
+
+
+def _kick_background_refresh():
+    """Fire a background thread to refresh the cache.
+    Single-flighted so N concurrent requests don't spawn N scrape passes.
+    """
+    global refresh_in_flight
+    with cache_lock:
+        if refresh_in_flight:
+            return
+        refresh_in_flight = True
+
+    def _worker():
+        global refresh_in_flight
+        try:
+            _refresh_cache_blocking()
+        except Exception as e:
+            logger.error(f"Background cache refresh failed: {type(e).__name__}: {e}")
+        finally:
+            with cache_lock:
+                refresh_in_flight = False
+
+    t = threading.Thread(target=_worker, name="cache-refresh", daemon=True)
+    t.start()
+
+
+def get_all_posts(force_refresh=False):
+    """Return cached posts using a stale-while-revalidate policy.
+
+    - Fresh (< CACHE_DURATION):  serve cache, do nothing.
+    - Stale (< CACHE_STALE_AFTER): serve cache immediately, kick background refresh.
+    - Expired or empty:           block once to populate, then serve.
+
+    force_refresh forces a synchronous rescrape (used by /refresh).
+    Keeps mobile clients from ever seeing a 20-30s cold-cache blocking scrape
+    on a Werkzeug worker that would otherwise time out on flaky Wi-Fi.
+    """
+    global cached_posts, cache_timestamp
+
+    if force_refresh:
+        return _refresh_cache_blocking()
+
+    with cache_lock:
+        now = datetime.now()
+        ts = cache_timestamp
+        have_cache = bool(cached_posts) and ts is not None
+        age = (now - ts).total_seconds() if ts is not None else float('inf')
+        snapshot = list(cached_posts)
+
+    if have_cache and age < CACHE_DURATION:
+        return snapshot
+
+    if have_cache and age < CACHE_STALE_AFTER:
+        _kick_background_refresh()
+        return snapshot
+
+    return _refresh_cache_blocking()
 
 
 def get_by_company_dedup():
@@ -3392,6 +3445,51 @@ def get_by_company_dedup():
 
     # Order the company view alphabetically (A-Z) by company name.
     return {name: by_company_dedup[name] for name in sorted(by_company_dedup, key=str.lower)}
+
+
+# =============================================================================
+# RESPONSE COMPRESSION
+# =============================================================================
+
+GZIP_MIN_BYTES = 1024
+GZIP_MIME_PREFIXES = ('text/', 'application/json', 'application/javascript',
+                      'application/xml', 'image/svg+xml')
+
+
+@app.after_request
+def _gzip_response(response):
+    """Gzip large text responses when the client advertises support.
+
+    The page is ~580KB uncompressed with 140 inline base64 SVGs; over mobile
+    Wi-Fi that alone is enough to hit iOS Safari's page-load timeout on the
+    first uncached fetch. Gzip cuts it ~7x. We skip streaming responses and
+    anything already content-encoded to avoid double-encoding.
+    """
+    accept = request.headers.get('Accept-Encoding', '')
+    if 'gzip' not in accept.lower():
+        return response
+    if response.direct_passthrough or response.status_code < 200 or response.status_code >= 300:
+        return response
+    if response.headers.get('Content-Encoding'):
+        return response
+    ctype = (response.mimetype or '').lower()
+    if not any(ctype.startswith(p) for p in GZIP_MIME_PREFIXES):
+        return response
+    data = response.get_data()
+    if len(data) < GZIP_MIN_BYTES:
+        return response
+
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode='wb', compresslevel=6, mtime=0) as gz:
+        gz.write(data)
+    compressed = buf.getvalue()
+    response.set_data(compressed)
+    response.headers['Content-Encoding'] = 'gzip'
+    response.headers['Content-Length'] = str(len(compressed))
+    vary = response.headers.get('Vary', '')
+    if 'Accept-Encoding' not in vary:
+        response.headers['Vary'] = (vary + ', Accept-Encoding').lstrip(', ')
+    return response
 
 
 # =============================================================================
@@ -3437,6 +3535,20 @@ def refresh():
     return jsonify({"status": "ok", "posts_count": len(posts)})
 
 
+@app.route('/health')
+def health():
+    """Cheap liveness probe.
+
+    Returns 200 without touching the scraper cache so mobile clients on
+    flaky Wi-Fi can quickly confirm they can reach the server before the
+    heavy `/` render request.
+    """
+    with cache_lock:
+        n = len(cached_posts)
+        ts = cache_timestamp.isoformat() if cache_timestamp else None
+    return jsonify({"status": "ok", "cached_posts": n, "cache_timestamp": ts})
+
+
 # =============================================================================
 # STARTUP
 # =============================================================================
@@ -3445,4 +3557,12 @@ if __name__ == '__main__':
     print("Starting Embodied AI News Aggregator...")
     print(f"Configured {len(BLOG_SOURCES)} blog sources with live scrapers")
     print("Visit http://localhost:80 to view the news feed")
-    app.run(debug=False, host='0.0.0.0', port=80)
+    # Warm the cache in the background so the very first `/` request (often
+    # from a mobile client on flaky Wi-Fi with a short page-load timeout)
+    # doesn't block on a 20-30s cold scrape.
+    _kick_background_refresh()
+    # threaded=True lets Werkzeug serve concurrent requests; without it a
+    # single slow response (or an in-flight refresh) blocks every other
+    # client, which manifests as "mobile browser can't load the page" while
+    # desktop is already connected.
+    app.run(debug=False, host='0.0.0.0', port=80, threaded=True)

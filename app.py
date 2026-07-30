@@ -44,40 +44,40 @@ REQUEST_HEADERS = {
 }
 
 BLOG_SOURCES = [
-    {"name": "Generalist AI", "url": "https://generalistai.com/assets/json/blog.json", "base_url": "https://generalistai.com", "color": "#6366f1"},
-    {"name": "Physical Intelligence", "url": "https://www.pi.website/blog", "base_url": "https://www.pi.website", "color": "#8b5cf6"},
-    {"name": "World Labs", "url": "https://www.worldlabs.ai/blog", "base_url": "https://www.worldlabs.ai", "color": "#ec4899"},
-    {"name": "Figure", "url": "https://www.figure.ai/news", "base_url": "https://www.figure.ai", "color": "#14b8a6"},
-    {"name": "Sunday Robotics", "url": "https://www.sunday.ai/journal", "base_url": "https://www.sunday.ai", "color": "#f59e0b"},
-    {"name": "Skild AI", "url": "https://www.skild.ai/blogs", "base_url": "https://www.skild.ai", "color": "#ef4444"},
-    {"name": "1X Technologies", "url": "https://www.1x.tech/discover", "base_url": "https://www.1x.tech", "color": "#000000"},
-    {"name": "Agility Robotics", "url": "https://www.agilityrobotics.com/resources", "base_url": "https://www.agilityrobotics.com", "color": "#ff6b35"},
-    {"name": "Sharpa", "url": "https://www.sharpa.com/blogs/research", "base_url": "https://www.sharpa.com", "color": "#00c853"},
-    {"name": "Hexagon Robotics", "url": "https://robotics.hexagon.com/news/", "base_url": "https://robotics.hexagon.com", "color": "#0078d4"},
-    {"name": "MANUS", "url": "https://www.manus-meta.com/blog", "base_url": "https://www.manus-meta.com", "color": "#1a1a1a"},
-    {"name": "BeingBeyond", "url": "https://research.beingbeyond.com/", "base_url": "https://research.beingbeyond.com", "color": "#5b21b6"},
-    {"name": "AGIBOT Finch", "url": "https://finch.agibot.com/research", "base_url": "https://finch.agibot.com", "color": "#d4a853"},
-    {"name": "Genesis AI", "url": "https://www.genesis.ai/blog", "base_url": "https://www.genesis.ai", "color": "#2a9d8f"},
-    {"name": "Ropedia", "url": "https://ropedia.com/", "base_url": "https://ropedia.com", "color": "#ccffa0"},
-    {"name": "OneRobotics", "url": "https://www.onerobot.com/news", "base_url": "https://www.onerobot.com", "color": "#1e90ff"},
-    {"name": "Galaxea", "url": "https://opengalaxea.github.io/G05/", "base_url": "https://opengalaxea.github.io/G05", "color": "#7c3aed"},
-    {"name": "Spirit AI", "url": "https://www.spirit-ai.com/en/blog/", "base_url": "https://www.spirit-ai.com", "color": "#0ea5e9"},
-    {"name": "Xiaomi Robotics", "url": "https://robotics.xiaomi.com/", "base_url": "https://robotics.xiaomi.com", "color": "#ff6900"},
-    {"name": "ByteDance Seed", "url": "https://seed.bytedance.com/en/research", "base_url": "https://seed.bytedance.com", "color": "#325ab4"},
-    {"name": "NVIDIA Blog", "url": "https://blogs.nvidia.com/blog/category/robotics/feed/", "base_url": "https://blogs.nvidia.com", "color": "#76b900"},
-    {"name": "NVIDIA GEAR", "url": "https://research.nvidia.com/labs/gear/", "base_url": "https://research.nvidia.com", "color": "#1a7f37"},
-    {"name": "X Square Robot", "url": "https://x2robot.com/en/news", "base_url": "https://x2robot.com", "color": "#0d9488"},
-    {"name": "Sanctuary AI", "url": "https://www.sanctuary.ai/blog/rss.xml", "base_url": "https://www.sanctuary.ai", "color": "#c026d3"},
-    {"name": "Boston Dynamics", "url": "https://bostondynamics.com/blog/", "base_url": "https://bostondynamics.com", "color": "#005288"},
-    {"name": "NVIDIA Cosmos Lab", "url": "https://research.nvidia.com/labs/cosmos-lab/", "base_url": "https://research.nvidia.com", "color": "#4ade80"},
-    {"name": "Agile Robots", "url": "https://www.agile-robots.com/en/news/", "base_url": "https://www.agile-robots.com", "color": "#e11d48"},
-    {"name": "DexForce", "url": "https://www.dexforce.com/core.html", "base_url": "https://www.dexforce.com", "color": "#f97316"},
-    {"name": "RL2 @ Georgia Tech", "url": "https://rl2.cc.gatech.edu/publications.json", "base_url": "https://rl2.cc.gatech.edu", "color": "#b3a369"},
-    {"name": "Physical Superintelligence Lab", "url": "https://psi-lab.ai/research.html", "base_url": "https://psi-lab.ai", "color": "#a855f7"},
-    {"name": "Dexmal", "url": "https://www.dexmal.com/research", "base_url": "https://www.dexmal.com", "color": "#00c8b4"},
-    {"name": "XDOF", "url": "https://www.xdof.ai/blog", "base_url": "https://www.xdof.ai", "color": "#6c6db0"},
-    {"name": "RoboTouch Lab", "url": "https://www.robotouchlab.com/publication/", "base_url": "https://www.robotouchlab.com", "color": "#e84a27"},
-    {"name": "REAL @ Stanford", "url": "https://real.stanford.edu/research.html", "base_url": "https://real.stanford.edu", "color": "#8c1515"},
+    {"name": "Generalist AI", "url": "https://generalistai.com/assets/json/blog.json", "base_url": "https://generalistai.com", "color": "#6366f1", "org_type": "company"},
+    {"name": "Physical Intelligence", "url": "https://www.pi.website/blog", "base_url": "https://www.pi.website", "color": "#8b5cf6", "org_type": "company"},
+    {"name": "World Labs", "url": "https://www.worldlabs.ai/blog", "base_url": "https://www.worldlabs.ai", "color": "#ec4899", "org_type": "company"},
+    {"name": "Figure", "url": "https://www.figure.ai/news", "base_url": "https://www.figure.ai", "color": "#14b8a6", "org_type": "company"},
+    {"name": "Sunday Robotics", "url": "https://www.sunday.ai/journal", "base_url": "https://www.sunday.ai", "color": "#f59e0b", "org_type": "company"},
+    {"name": "Skild AI", "url": "https://www.skild.ai/blogs", "base_url": "https://www.skild.ai", "color": "#ef4444", "org_type": "company"},
+    {"name": "1X Technologies", "url": "https://www.1x.tech/discover", "base_url": "https://www.1x.tech", "color": "#000000", "org_type": "company"},
+    {"name": "Agility Robotics", "url": "https://www.agilityrobotics.com/resources", "base_url": "https://www.agilityrobotics.com", "color": "#ff6b35", "org_type": "company"},
+    {"name": "Sharpa", "url": "https://www.sharpa.com/blogs/research", "base_url": "https://www.sharpa.com", "color": "#00c853", "org_type": "company"},
+    {"name": "Hexagon Robotics", "url": "https://robotics.hexagon.com/news/", "base_url": "https://robotics.hexagon.com", "color": "#0078d4", "org_type": "company"},
+    {"name": "MANUS", "url": "https://www.manus-meta.com/blog", "base_url": "https://www.manus-meta.com", "color": "#1a1a1a", "org_type": "company"},
+    {"name": "BeingBeyond", "url": "https://research.beingbeyond.com/", "base_url": "https://research.beingbeyond.com", "color": "#5b21b6", "org_type": "company"},
+    {"name": "AGIBOT Finch", "url": "https://finch.agibot.com/research", "base_url": "https://finch.agibot.com", "color": "#d4a853", "org_type": "company"},
+    {"name": "Genesis AI", "url": "https://www.genesis.ai/blog", "base_url": "https://www.genesis.ai", "color": "#2a9d8f", "org_type": "company"},
+    {"name": "Ropedia", "url": "https://ropedia.com/", "base_url": "https://ropedia.com", "color": "#ccffa0", "org_type": "company"},
+    {"name": "OneRobotics", "url": "https://www.onerobot.com/news", "base_url": "https://www.onerobot.com", "color": "#1e90ff", "org_type": "company"},
+    {"name": "Galaxea", "url": "https://opengalaxea.github.io/G05/", "base_url": "https://opengalaxea.github.io/G05", "color": "#7c3aed", "org_type": "company"},
+    {"name": "Spirit AI", "url": "https://www.spirit-ai.com/en/blog/", "base_url": "https://www.spirit-ai.com", "color": "#0ea5e9", "org_type": "company"},
+    {"name": "Xiaomi Robotics", "url": "https://robotics.xiaomi.com/", "base_url": "https://robotics.xiaomi.com", "color": "#ff6900", "org_type": "company"},
+    {"name": "ByteDance Seed", "url": "https://seed.bytedance.com/en/research", "base_url": "https://seed.bytedance.com", "color": "#325ab4", "org_type": "company"},
+    {"name": "NVIDIA Blog", "url": "https://blogs.nvidia.com/blog/category/robotics/feed/", "base_url": "https://blogs.nvidia.com", "color": "#76b900", "org_type": "company"},
+    {"name": "NVIDIA GEAR", "url": "https://research.nvidia.com/labs/gear/", "base_url": "https://research.nvidia.com", "color": "#1a7f37", "org_type": "company"},
+    {"name": "X Square Robot", "url": "https://x2robot.com/en/news", "base_url": "https://x2robot.com", "color": "#0d9488", "org_type": "company"},
+    {"name": "Sanctuary AI", "url": "https://www.sanctuary.ai/blog/rss.xml", "base_url": "https://www.sanctuary.ai", "color": "#c026d3", "org_type": "company"},
+    {"name": "Boston Dynamics", "url": "https://bostondynamics.com/blog/", "base_url": "https://bostondynamics.com", "color": "#005288", "org_type": "company"},
+    {"name": "NVIDIA Cosmos Lab", "url": "https://research.nvidia.com/labs/cosmos-lab/", "base_url": "https://research.nvidia.com", "color": "#4ade80", "org_type": "company"},
+    {"name": "Agile Robots", "url": "https://www.agile-robots.com/en/news/", "base_url": "https://www.agile-robots.com", "color": "#e11d48", "org_type": "company"},
+    {"name": "DexForce", "url": "https://www.dexforce.com/core.html", "base_url": "https://www.dexforce.com", "color": "#f97316", "org_type": "company"},
+    {"name": "RL2 @ Georgia Tech", "url": "https://rl2.cc.gatech.edu/publications.json", "base_url": "https://rl2.cc.gatech.edu", "color": "#b3a369", "org_type": "lab"},
+    {"name": "Physical Superintelligence Lab", "url": "https://psi-lab.ai/research.html", "base_url": "https://psi-lab.ai", "color": "#a855f7", "org_type": "company"},
+    {"name": "Dexmal", "url": "https://www.dexmal.com/research", "base_url": "https://www.dexmal.com", "color": "#00c8b4", "org_type": "company"},
+    {"name": "XDOF", "url": "https://www.xdof.ai/blog", "base_url": "https://www.xdof.ai", "color": "#6c6db0", "org_type": "company"},
+    {"name": "RoboTouch Lab", "url": "https://www.robotouchlab.com/publication/", "base_url": "https://www.robotouchlab.com", "color": "#e84a27", "org_type": "lab"},
+    {"name": "REAL @ Stanford", "url": "https://real.stanford.edu/research.html", "base_url": "https://real.stanford.edu", "color": "#8c1515", "org_type": "lab"},
 ]
 
 # Display companies alphabetically (A-Z) by name.
@@ -3503,11 +3503,19 @@ def index():
     by_company = get_by_company_dedup()
 
     company_colors = {s["name"]: s["color"] for s in BLOG_SOURCES}
+    org_types = {s["name"]: s.get("org_type", "company") for s in BLOG_SOURCES}
+
+    by_company_only = {name: p for name, p in by_company.items()
+                       if org_types.get(name) == "company"}
+    by_lab_only = {name: p for name, p in by_company.items()
+                   if org_types.get(name) == "lab"}
 
     return render_template(
         'index.html',
         posts=posts,
         by_company=by_company,
+        by_company_only=by_company_only,
+        by_lab_only=by_lab_only,
         company_colors=company_colors,
         companies=BLOG_SOURCES
     )

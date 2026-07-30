@@ -419,6 +419,7 @@
             <nav>
                 <button class="nav-btn active" onclick="showView('timeline', this)">Timeline</button>
                 <button class="nav-btn" onclick="showView('company', this)">By Company</button>
+                <button class="nav-btn" onclick="showView('lab', this)">By Lab</button>
                 <button class="refresh-btn" id="refresh-btn" onclick="refreshData()">Refresh</button>
             </nav>
         </div>
@@ -464,10 +465,11 @@
             </div>
         </section>
         
-        <!-- By Company View -->
-        <section id="company-view" class="view-section">
+        <!-- By Company / By Lab View (shared markup via macro) -->
+        {% macro render_source_grid(sources_map, empty_label) %}
+            {% if sources_map %}
             <div class="company-grid">
-                {% for company, company_posts in by_company.items() %}
+                {% for company, company_posts in sources_map.items() %}
                 <div class="company-section">
                     <div class="company-header">
                         <span class="company-dot" style="background: {{ company_colors[company] }}"></span>
@@ -495,6 +497,19 @@
                 </div>
                 {% endfor %}
             </div>
+            {% else %}
+            <p style="color: var(--text-secondary); padding: 2rem; text-align: center;">
+                No {{ empty_label }} posts available.
+            </p>
+            {% endif %}
+        {% endmacro %}
+
+        <section id="company-view" class="view-section">
+            {{ render_source_grid(by_company_only, "company") }}
+        </section>
+
+        <section id="lab-view" class="view-section">
+            {{ render_source_grid(by_lab_only, "lab") }}
         </section>
     </main>
     
@@ -504,17 +519,20 @@
     </footer>
     
     <script>
+        const VIEWS = {
+            timeline: 'timeline-view',
+            company:  'company-view',
+            lab:      'lab-view',
+        };
+
         function showView(view, btn) {
             document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             document.querySelectorAll('.view-section').forEach(section => section.classList.remove('active'));
-            
-            if (view === 'timeline') {
-                document.getElementById('timeline-view').classList.add('active');
-            } else {
-                document.getElementById('company-view').classList.add('active');
-            }
-            
+
+            const target = VIEWS[view] || VIEWS.timeline;
+            document.getElementById(target).classList.add('active');
+
             localStorage.setItem('preferredView', view);
         }
 
@@ -540,16 +558,18 @@
                     btn.textContent = originalText;
                 });
         }
-        
-        // Restore view preference
-        const savedView = localStorage.getItem('preferredView');
-        if (savedView === 'company') {
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.view-section').forEach(section => section.classList.remove('active'));
-            document.querySelector('.nav-btn:nth-child(2)').classList.add('active');
-            document.getElementById('company-view').classList.add('active');
-        }
-        
+
+        // Restore view preference on load. Match the nav button by its data-view
+        // (falls back to the first .nav-btn if the saved value is stale).
+        (function restoreView() {
+            const saved = localStorage.getItem('preferredView');
+            if (!saved || !VIEWS[saved] || saved === 'timeline') return;
+            const btnIndex = Object.keys(VIEWS).indexOf(saved);
+            if (btnIndex < 0) return;
+            const btn = document.querySelectorAll('.nav-btn')[btnIndex];
+            if (btn) showView(saved, btn);
+        })();
+
         // Auto-refresh every 5 minutes
         setInterval(() => {
             fetch('/refresh')

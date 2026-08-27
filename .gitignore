@@ -8,3 +8,4 @@ proxy_*.sh
 # Local IDE / agent scratch state.
 .sisyphus/
 opencode.json
+.env

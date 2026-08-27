@@ -78,6 +78,7 @@ BLOG_SOURCES = [
     {"name": "XDOF", "url": "https://www.xdof.ai/blog", "base_url": "https://www.xdof.ai", "color": "#6c6db0", "org_type": "company"},
     {"name": "RoboTouch Lab", "url": "https://www.robotouchlab.com/publication/", "base_url": "https://www.robotouchlab.com", "color": "#e84a27", "org_type": "lab"},
     {"name": "REAL @ Stanford", "url": "https://real.stanford.edu/research.html", "base_url": "https://real.stanford.edu", "color": "#8c1515", "org_type": "lab"},
+    {"name": "Perceptron", "url": "https://www.perceptron.inc/blog", "base_url": "https://www.perceptron.inc", "color": "#111111", "org_type": "company"},
 ]
 
 # Display companies alphabetically (A-Z) by name.
@@ -2999,6 +3000,150 @@ def scrape_real_stanford(source):
     return posts
 
 
+def scrape_perceptron(source):
+    """
+    Perceptron (perceptron.inc) is a Framer-generated site. The blog listing
+    is server-rendered HTML: each post is an <a> tag with an href like
+    "./blog/<slug>" containing:
+    - `div[data-framer-name="Title"]` with the post title
+    - `div[data-framer-name="Date"]` with the publication date
+
+    Framer duplicates every card for Desktop/Tablet/Mobile breakpoints, so
+    we dedupe by URL. Dates come in two formats depending on the card
+    variant:
+    - "Aug 26th, 2026" / "July 9th, 2026" (with ordinal suffix, mixed
+      abbreviated + full month names) - used by featured "Isaac" cards
+      and "Standard" cards.
+    - "May 12, 2026" / "Jan 21, 2026" (no ordinal, short month) - used by
+      other "Highlight" cards.
+
+    Descriptions aren't shown on the listing page, so we enrich them from
+    the Framer search index JSON (referenced in the page's
+    `<meta name="framer-search-index">` tag). The search index also serves
+    as a resilience net: if HTML parsing regresses after a Framer redeploy
+    (which uses randomized class hashes), we can fall back to it. However,
+    the search index has its own quirks - some entries return a generic
+    "Perceptron" site title instead of the real post title, and dates
+    aren't always present - so HTML remains the primary source.
+
+    Thumbnails: only the topmost "Isaac 0.5" featured card has a real
+    image; every other card renders a small SVG icon. We filter those
+    out and let the generic placeholder SVG generator handle the rest.
+    """
+    company = source["name"]
+    base_url = source["base_url"]
+    response = make_request(source["url"])
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    # Parse the two date formats used on the listing page. First strip ordinal
+    # suffixes ("26th" -> "26"), then try short + long month names.
+    def _parse_perceptron_date(text):
+        if not text:
+            return None
+        cleaned = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', text.strip())
+        return safe_parse_date(cleaned, ['%b %d, %Y', '%B %d, %Y'])
+
+    # Optional enrichment: fetch descriptions from Framer's search index.
+    descriptions = {}
+    idx_meta = soup.find('meta', attrs={'name': 'framer-search-index'})
+    if idx_meta and idx_meta.get('content'):
+        try:
+            idx_resp = make_request(idx_meta['content'])
+            idx_data = idx_resp.json()
+            if isinstance(idx_data, dict):
+                for path, entry in idx_data.items():
+                    if not isinstance(entry, dict):
+                        continue
+                    if not path.startswith('/blog/') or path == '/blog':
+                        continue
+                    desc = (entry.get('description') or '').strip()
+                    if desc:
+                        # Search-index descriptions are single-line but the
+                        # generic site-wide fallback bleeds a two-line
+                        # "A layer of intelligence... research company..."
+                        # string into unindexed pages - skip that boilerplate.
+                        if 'A layer of intelligence for the physical world' in desc:
+                            continue
+                        descriptions[path] = desc
+        except (requests.RequestException, ValueError, json.JSONDecodeError) as e:
+            logger.warning(f"[Perceptron] Search index fetch failed: {e}")
+
+    posts = []
+    seen_urls = set()
+
+    # Framer emits three copies of each card (Desktop / Tablet / Mobile).
+    # Tablet/Mobile variants sometimes swap the title for a category label
+    # ("Model", "Research"), so we explicitly prefer Desktop variants first
+    # and fall back to the others only for slugs Desktop didn't cover.
+    all_links = soup.find_all('a', href=True)
+    def _variant_key(a):
+        name = (a.get('data-framer-name') or '').lower()
+        if 'desktop' in name:
+            return 0
+        if 'tablet' in name:
+            return 1
+        return 2
+    all_links.sort(key=_variant_key)
+
+    for a_tag in all_links:
+        href = a_tag.get('href', '').strip()
+        if href.startswith('./'):
+            href = href[1:]
+        if not href.startswith('/blog/') or href.rstrip('/') == '/blog':
+            continue
+
+        title_div = a_tag.find('div', attrs={'data-framer-name': 'Title'})
+        if not title_div:
+            continue
+        title = title_div.get_text(strip=True)
+        if not title or len(title) < 3:
+            continue
+
+        url = f"{base_url}{href}"
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        date = None
+        date_div = a_tag.find('div', attrs={'data-framer-name': 'Date'})
+        if date_div:
+            date = _parse_perceptron_date(date_div.get_text(strip=True))
+
+        # Filter out the 20x20 SVG "arrow" icon every non-featured card
+        # renders. Match `width=20&` as a full query-arg boundary so we
+        # don't accidentally match `width=2048` on real thumbnails.
+        image_url = None
+        for img in a_tag.find_all('img'):
+            src = img.get('src', '')
+            if not src or not src.startswith('http'):
+                continue
+            if src.lower().endswith('.svg'):
+                continue
+            if re.search(r'[?&]width=20(&|$)', src):
+                continue
+            image_url = src
+            break
+
+        # Strip Framer's ?width=...&height=... query so the browser can
+        # pick its own resolution and we don't cache a downscaled version.
+        if image_url and '?' in image_url:
+            image_url = image_url.split('?', 1)[0]
+
+        summary = descriptions.get(href, "")
+
+        posts.append({
+            "title": title,
+            "url": url,
+            "date": date or datetime.min,
+            "summary": summary,
+            "image": image_url,
+            "company": company,
+        })
+
+    logger.info(f"[Perceptron] Scraped {len(posts)} posts")
+    return posts
+
+
 # =============================================================================
 # SCRAPER DISPATCH
 # =============================================================================
@@ -3038,6 +3183,7 @@ SCRAPERS = {
     "XDOF": scrape_xdof,
     "RoboTouch Lab": scrape_robotouch_lab,
     "REAL @ Stanford": scrape_real_stanford,
+    "Perceptron": scrape_perceptron,
 }
 
 
@@ -3270,6 +3416,22 @@ FALLBACK_DATA = {
         ("DexMachina: Functional Retargeting for Bimanual Dexterous Manipulation", "https://project-dexmachina.github.io/", datetime(2026, 1, 1), "[ICML 2026] Zhao Mandi, Yifan Hou, Dieter Fox, Yashraj Narang, Ajay Mandlekar, Shuran Song", "https://shurans.github.io/images/projects/DexMachina.png"),
         ("Minimalist Compliance Control", "https://minimalist-compliance-control.github.io/", datetime(2026, 1, 1), "[RSS 2026] Haochen Shi, Songbo Hu, Yifan Hou, Weizhuo Wang, C. Karen Liu, Shuran Song", None),
         ("HoMMI: Learning Whole-Body Mobile Manipulation from Human Demonstrations", "https://hommi-robot.github.io/", datetime(2026, 1, 1), "[RSS 2026] Xiaomeng Xu, Jisang Park, Han Zhang, Eric Cousineau, Aditya Bhat, Jose Barreiros, Dian Wang, Jeannette Bohg, Shuran Song", None),
+    ],
+    "Perceptron": [
+        ("Introducing Isaac 0.5", "https://www.perceptron.inc/blog/introducing-isaac-0-5", datetime(2026, 8, 26), "Today we are releasing Isaac 0.5, our new open-source embodied foundation model. To our knowledge, it is the first open model at the frontier of multimodal video understanding, embodied reasoning, and robot control.", "https://framerusercontent.com/images/0TYexaZaoHxQgC0qy3bc0C4RYA.png"),
+        ("Introducing Perceptron Egocentric API", "https://www.perceptron.inc/blog/introducing-perceptron-egocentric-api", datetime(2026, 7, 9), "Frontier Embodied Reasoning for large-scale robotic data annotation.", None),
+        ("Introducing Perceptron Files API", "https://www.perceptron.inc/blog/introducing-perceptron-files-api", datetime(2026, 6, 23), "Upload an image or video once and reference it by id across as many requests as you need.", None),
+        ("Introducing Client-Side Video Decoding", "https://www.perceptron.inc/blog/introducing-client-side-video-decoding", datetime(2026, 6, 26), "Enabling smarter sampling and lower-latency video analytics.", None),
+        ("Teaching VLMs to think visually", "https://www.perceptron.inc/blog/teaching-vlms-to-think-visually", datetime(2026, 6, 22), "What are good reasoning priors for visual problem solving in VLMs?", None),
+        ("Perceptron Agentic Detection", "https://www.perceptron.inc/blog/introducing-perceptron-agentic-detection", datetime(2026, 6, 10), "The Agentic Detection API enables precise localization of anything you can describe in natural language.", None),
+        ("Introducing Perceptron Mk1", "https://www.perceptron.inc/blog/introducing-perceptron-mk1", datetime(2026, 5, 12), "Perceptron Mk1 ('Mark One'): a model purpose-built for video and embodied reasoning.", None),
+        ("Perceptron Vision MCP Server", "https://www.perceptron.inc/blog/mcp", datetime(2026, 3, 26), "The Perceptron Vision MCP Server gives any AI agent access to state-of-the-art visual perception.", None),
+        ("SkillRater: Untangling Capabilities in Multimodal Data", "https://www.perceptron.inc/blog/skillrater", datetime(2026, 2, 13), "Decomposing data quality into independent capability dimensions.", None),
+        ("Composing Weight and Data Sparsity in MoE", "https://www.perceptron.inc/blog/composing-weight-and-data-sparsity-in-moe", datetime(2026, 1, 21), "", None),
+        ("Introducing Isaac 0.2", "https://www.perceptron.inc/blog/introducing-isaac-0-2", datetime(2025, 12, 10), "", None),
+        ("Perceptron Platform", "https://www.perceptron.inc/blog/perceptron-platform", datetime(2025, 11, 12), "", None),
+        ("TensorStream", "https://www.perceptron.inc/blog/tensorstream", datetime(2025, 9, 23), "", None),
+        ("Introducing Isaac 0.1", "https://www.perceptron.inc/blog/introducing-isaac-0-1", datetime(2025, 9, 17), "", None),
     ],
 }
 

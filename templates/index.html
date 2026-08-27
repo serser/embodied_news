@@ -114,6 +114,15 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
+
+        .admin-link {
+            text-decoration: none;
+            display: inline-block;
+        }
+        .admin-link:hover {
+            border-color: #6366f1;
+            color: var(--text-primary);
+        }
         
         /* Main Content */
         main {
@@ -421,6 +430,7 @@
                 <button class="nav-btn" onclick="showView('company', this)">By Company</button>
                 <button class="nav-btn" onclick="showView('lab', this)">By Lab</button>
                 <button class="refresh-btn" id="refresh-btn" onclick="refreshData()">Refresh</button>
+                <a class="refresh-btn admin-link" href="/admin" title="Add a new source">+ Add source</a>
             </nav>
         </div>
     </header>
@@ -524,6 +534,15 @@
             company:  'company-view',
             lab:      'lab-view',
         };
+
+        (function attachAdminToken() {
+            const link = document.querySelector('.admin-link');
+            if (!link) return;
+            try {
+                const t = localStorage.getItem('sisyphus_admin_token');
+                if (t) link.href = '/admin?token=' + encodeURIComponent(t);
+            } catch (e) {}
+        })();
 
         function showView(view, btn) {
             document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));

@@ -4,6 +4,9 @@ Embodied AI News Aggregator - Live Scraping with Fallback
 Fetches live data from blog sources, falls back to cached data on failure.
 """
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, render_template, jsonify, request
 import requests
 from bs4 import BeautifulSoup
@@ -16,7 +19,9 @@ import base64
 import gzip
 import io
 import json
+import os
 import re
+import textwrap
 import logging
 
 # =============================================================================
@@ -80,6 +85,28 @@ BLOG_SOURCES = [
     {"name": "REAL @ Stanford", "url": "https://real.stanford.edu/research.html", "base_url": "https://real.stanford.edu", "color": "#8c1515", "org_type": "lab"},
     {"name": "Perceptron", "url": "https://www.perceptron.inc/blog", "base_url": "https://www.perceptron.inc", "color": "#111111", "org_type": "company"},
 ]
+
+import sources as _sources_pkg
+
+
+def _merge_auto_sources():
+    """Reload sources/*.py and merge them into BLOG_SOURCES + SCRAPERS.
+
+    Called at import time (below) and again after the admin form saves
+    a new source. Idempotent: overwrites any prior auto-added entry with
+    the same name; leaves hand-written entries untouched.
+    """
+    global BLOG_SOURCES
+    auto_sources, auto_scrapers = _sources_pkg.load_all()
+    hand_names = {s["name"] for s in BLOG_SOURCES if s["name"] not in {a["name"] for a in auto_sources}}
+    kept = [s for s in BLOG_SOURCES if s["name"] in hand_names]
+    kept.extend(auto_sources)
+    kept.sort(key=lambda s: s["name"].lower())
+    BLOG_SOURCES = kept
+    return auto_scrapers
+
+
+_AUTO_SCRAPERS = _merge_auto_sources()
 
 # Display companies alphabetically (A-Z) by name.
 BLOG_SOURCES.sort(key=lambda s: s["name"].lower())
@@ -3186,6 +3213,9 @@ SCRAPERS = {
     "Perceptron": scrape_perceptron,
 }
 
+for _name, _fn in _AUTO_SCRAPERS.items():
+    SCRAPERS.setdefault(_name, _fn)
+
 
 # =============================================================================
 # FALLBACK DATA - Used only when live scraping fails
@@ -3717,6 +3747,283 @@ def health():
         n = len(cached_posts)
         ts = cache_timestamp.isoformat() if cache_timestamp else None
     return jsonify({"status": "ok", "cached_posts": n, "cache_timestamp": ts})
+
+
+# =============================================================================
+# ADMIN: ADD SOURCE VIA WEB FORM
+# =============================================================================
+
+import uuid
+from pathlib import Path
+
+import generic_scraper as _generic
+import llm_scraper_generator as _llm_gen
+
+_SOURCES_DIR = Path(__file__).parent / "sources"
+
+_preview_lock = threading.RLock()
+_preview_store: dict[str, dict] = {}
+_PREVIEW_TTL = 900
+
+
+def _admin_authed() -> bool:
+    """Reject the admin endpoints unless the request carries the shared token.
+
+    Token comes from env var SISYPHUS_ADMIN_TOKEN; if unset, the admin
+    endpoints are disabled entirely so a forgotten deploy can't leak the
+    'Add source' button.
+    """
+    expected = os.environ.get("SISYPHUS_ADMIN_TOKEN", "").strip()
+    if not expected:
+        return False
+    got = (request.args.get("token") or "").strip()
+    return got == expected
+
+
+def _admin_disabled_reason() -> str | None:
+    if not os.environ.get("SISYPHUS_ADMIN_TOKEN", "").strip():
+        return "SISYPHUS_ADMIN_TOKEN is not set on the server"
+    return None
+
+
+def _prune_previews():
+    now = datetime.now().timestamp()
+    with _preview_lock:
+        expired = [k for k, v in _preview_store.items() if now - v["created_at"] > _PREVIEW_TTL]
+        for k in expired:
+            _preview_store.pop(k, None)
+
+
+def _serialize_post(p: dict) -> dict:
+    return {
+        "title": p.get("title", ""),
+        "url": p.get("url", ""),
+        "date": p["date"].isoformat() if p.get("date") and p["date"].year > 1 else None,
+        "summary": p.get("summary", ""),
+        "image": p.get("image"),
+    }
+
+
+def _color_from_url(url: str) -> str:
+    h = hashlib.md5(url.encode()).hexdigest()
+    return "#" + h[:6]
+
+
+@app.route('/admin')
+def admin_form():
+    reason = _admin_disabled_reason()
+    if reason:
+        return f"Admin disabled: {reason}. Set SISYPHUS_ADMIN_TOKEN and restart.", 503
+    if not _admin_authed():
+        return "Forbidden. Append ?token=<your-token> to the URL.", 403
+    return render_template("admin.html")
+
+
+@app.route('/admin/preview', methods=['POST'])
+def admin_preview():
+    if not _admin_authed():
+        return jsonify({"error": "forbidden"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    url = (payload.get("url") or "").strip()
+    if not url or not url.startswith(("http://", "https://")):
+        return jsonify({"error": "url must start with http:// or https://"}), 400
+
+    parsed = urlparse(url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+    meta = _generic.extract_site_metadata(url)
+    name = (payload.get("name") or "").strip() or meta["suggested_name"] or parsed.netloc
+    color = (payload.get("color") or "").strip() or meta["suggested_color"] or _color_from_url(url)
+    org_type = (payload.get("org_type") or "company").strip()
+    if org_type not in ("company", "lab"):
+        org_type = "company"
+
+    source_stub = {
+        "name": name,
+        "url": url,
+        "base_url": base_url,
+        "color": color,
+        "org_type": org_type,
+    }
+
+    logger.info(f"[admin] preview requested for {url} (name={name!r})")
+
+    posts, strategy = _generic.scrape_generic(source_stub)
+    code = None
+
+    if len(posts) >= _generic.MIN_ACCEPTABLE_POSTS and _generic._has_enough_real_dates(posts):
+        pass
+    else:
+        if not os.environ.get("MIMO_API_KEY", "").strip():
+            if not posts:
+                return jsonify({
+                    "error": "Generic scraper found nothing and MIMO_API_KEY is not set to enable LLM fallback."
+                }), 422
+            strategy = f"weak:{strategy}"
+        else:
+            logger.info(f"[admin] generic returned {len(posts)} posts (strategy={strategy}); invoking LLM")
+            try:
+                code = _llm_gen.generate_scraper_code(
+                    url=url, name=name, base_url=base_url, color=color, org_type=org_type,
+                )
+            except _llm_gen.LLMGenerationError as e:
+                if posts:
+                    strategy = f"weak:{strategy}"
+                else:
+                    return jsonify({"error": f"LLM fallback failed: {e}"}), 422
+            else:
+                llm_posts, llm_err = _run_llm_scraper_ephemeral(code, source_stub)
+                if llm_err or len(llm_posts) < 1:
+                    if posts:
+                        strategy = f"weak:{strategy}"
+                    else:
+                        return jsonify({"error": f"LLM-generated scraper failed: {llm_err or 'returned 0 posts'}"}), 422
+                else:
+                    posts = llm_posts
+                    strategy = "llm_generated"
+
+    if not posts:
+        return jsonify({"error": "No posts extracted by any strategy."}), 422
+
+    token = uuid.uuid4().hex
+    _prune_previews()
+    with _preview_lock:
+        _preview_store[token] = {
+            "created_at": datetime.now().timestamp(),
+            "source": source_stub,
+            "strategy": strategy,
+            "code": code,
+            "posts": posts,
+        }
+
+    return jsonify({
+        "preview_token": token,
+        "strategy": strategy,
+        "posts": [_serialize_post(p) for p in posts[:5]],
+        "suggested_name": meta["suggested_name"],
+        "suggested_color": meta["suggested_color"],
+    })
+
+
+def _run_llm_scraper_ephemeral(code: str, source: dict) -> tuple[list, str | None]:
+    """Load LLM-generated code from memory and run scrape() once.
+
+    Uses a unique dotted module name so successive attempts don't collide
+    in sys.modules. Cleans up the module entry after the call so a failed
+    attempt can't leak into the runtime.
+    """
+    tmp_name = f"sources._tmp_preview_{uuid.uuid4().hex[:8]}"
+    import importlib.util
+    spec = importlib.util.spec_from_loader(tmp_name, loader=None)
+    if spec is None:
+        return [], "could not create module spec"
+    module = importlib.util.module_from_spec(spec)
+    try:
+        exec(compile(code, f"<{tmp_name}>", "exec"), module.__dict__)
+    except Exception as e:
+        return [], f"module exec raised: {type(e).__name__}: {e}"
+
+    scrape_fn = getattr(module, "scrape", None)
+    if not callable(scrape_fn):
+        return [], "generated module missing scrape() function"
+
+    try:
+        result = scrape_fn(source)
+    except Exception as e:
+        return [], f"scrape() raised: {type(e).__name__}: {e}"
+
+    if not isinstance(result, list):
+        return [], f"scrape() returned {type(result).__name__}, not list"
+    return result, None
+
+
+@app.route('/admin/add-source', methods=['POST'])
+def admin_add_source():
+    if not _admin_authed():
+        return jsonify({"error": "forbidden"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    token = (payload.get("preview_token") or "").strip()
+    if not token:
+        return jsonify({"error": "preview_token required"}), 400
+
+    _prune_previews()
+    with _preview_lock:
+        entry = _preview_store.pop(token, None)
+    if not entry:
+        return jsonify({"error": "preview expired or not found; re-run preview"}), 404
+
+    source = entry["source"]
+    strategy = entry["strategy"]
+    code = entry["code"]
+    posts = entry["posts"]
+
+    if not posts:
+        return jsonify({"error": "preview had no posts to save"}), 400
+
+    module_name = _sources_pkg.slugify_module_name(source["name"])
+
+    is_llm_code = code is not None
+    if not is_llm_code:
+        code = _render_generic_wrapper_module(source, strategy)
+
+    if is_llm_code:
+        try:
+            _llm_gen.validate_code(code)
+        except _llm_gen.LLMGenerationError as e:
+            return jsonify({"error": f"code failed validation: {e}"}), 422
+
+    _SOURCES_DIR.mkdir(exist_ok=True)
+    (_SOURCES_DIR / "__init__.py").exists() or (_SOURCES_DIR / "__init__.py").touch()
+
+    try:
+        target = _llm_gen.save_scraper_module(module_name, code, _SOURCES_DIR)
+    except Exception as e:
+        return jsonify({"error": f"could not write module: {e}"}), 500
+
+    try:
+        _sources_pkg.register(module_name, source)
+    except Exception as e:
+        target.unlink(missing_ok=True)
+        return jsonify({"error": f"registry write failed: {e}"}), 500
+
+    global SCRAPERS
+    auto = _merge_auto_sources()
+    for _n, _fn in auto.items():
+        SCRAPERS[_n] = _fn
+
+    with cache_lock:
+        global cache_timestamp
+        cache_timestamp = None
+
+    logger.info(f"[admin] saved source {source['name']!r} as sources/{module_name}.py (strategy={strategy})")
+    return jsonify({
+        "status": "ok",
+        "name": source["name"],
+        "module": module_name,
+        "strategy": strategy,
+    })
+
+
+def _render_generic_wrapper_module(source: dict, strategy: str) -> str:
+    """Emit a tiny module that just delegates to generic_scraper.scrape_generic.
+
+    Used when the generic path succeeded and we don't need the LLM to
+    write custom code. The saved module is self-contained (imports
+    generic_scraper) so a future startup still works even if this file
+    changes.
+    """
+    src_repr = repr(source)
+    return textwrap.dedent(f'''\
+        from generic_scraper import scrape_generic as _scrape_generic
+
+        SOURCE = {src_repr}
+
+        def scrape(source):
+            posts, _ = _scrape_generic(source)
+            return posts
+        ''')
 
 
 # =============================================================================

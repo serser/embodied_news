@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Add Source</title>
+  <style>
+    :root {
+      --bg: #0f0f10;
+      --panel: #1a1a1c;
+      --panel-2: #232326;
+      --border: #2a2a2d;
+      --text: #e5e5e7;
+      --muted: #8e8e93;
+      --accent: #6366f1;
+      --ok: #10b981;
+      --warn: #f59e0b;
+      --err: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .wrap { max-width: 780px; margin: 0 auto; padding: 40px 24px; }
+    h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.02em; }
+    p.lead { color: var(--muted); margin: 0 0 32px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    input[type="text"], input[type="url"], select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 15px;
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+    input[type="text"]:focus, input[type="url"]:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .field { margin-bottom: 16px; }
+    .field:last-child { margin-bottom: 0; }
+    button {
+      padding: 10px 20px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+    .actions { display: flex; gap: 12px; margin-top: 20px; }
+    .status {
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      display: none;
+    }
+    .status.ok    { background: rgba(16, 185, 129, 0.1); border: 1px solid var(--ok);   color: #6ee7b7; display: block; }
+    .status.warn  { background: rgba(245, 158, 11, 0.1); border: 1px solid var(--warn); color: #fcd34d; display: block; }
+    .status.err   { background: rgba(239, 68, 68, 0.1);  border: 1px solid var(--err);  color: #fca5a5; display: block; }
+    .status.info  { background: rgba(99, 102, 241, 0.1); border: 1px solid var(--accent); color: #a5b4fc; display: block; }
+    .preview {
+      margin-top: 16px;
+      display: none;
+    }
+    .preview-post {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    .preview-post .title { font-weight: 600; }
+    .preview-post .meta  { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    code {
+      background: var(--panel-2);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin-right: 8px;
+      vertical-align: -2px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Add a new source</h1>
+    <p class="lead">Paste a blog URL. The server tries a deterministic scraper first (RSS / Next.js / HTML heuristics), then falls back to MiMo if that fails. <a href="/">Back to feed</a></p>
+
+    <div class="panel">
+      <div class="field">
+        <label for="url">Blog URL <span style="color: var(--err)">*</span></label>
+        <input type="url" id="url" placeholder="https://newlab.ai/blog" required>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="name">Name (optional)</label>
+          <input type="text" id="name" placeholder="Auto-detected from &lt;title&gt;">
+        </div>
+        <div class="field">
+          <label for="color">Color (optional)</label>
+          <input type="text" id="color" placeholder="#6366f1">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="org_type">Organization type</label>
+        <select id="org_type">
+          <option value="company">Company</option>
+          <option value="lab">Academic lab</option>
+        </select>
+      </div>
+
+      <div class="actions">
+        <button id="btn-preview">Preview scrape</button>
+        <button id="btn-save" class="secondary" disabled>Save source</button>
+      </div>
+
+      <div id="status" class="status"></div>
+      <div id="preview" class="preview"></div>
+    </div>
+
+    <div class="panel" style="font-size: 13px; color: var(--muted);">
+      <strong style="color: var(--text);">How this works</strong>
+      <ol style="padding-left: 20px; margin: 8px 0 0;">
+        <li>Preview: server tries generic scraper (RSS &rarr; Next.js &rarr; HTML). Shows first 5 posts.</li>
+        <li>If generic returns &lt; 3 posts, server invokes MiMo to write a bespoke scraper (takes ~30&ndash;60s).</li>
+        <li>Generated code is validated (AST + import allowlist), saved to <code>sources/</code>, and executed once.</li>
+        <li>Save: registers the source and refreshes the feed cache.</li>
+      </ol>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const urlIn    = document.getElementById('url');
+  const nameIn   = document.getElementById('name');
+  const colorIn  = document.getElementById('color');
+  const orgIn    = document.getElementById('org_type');
+  const btnPrev  = document.getElementById('btn-preview');
+  const btnSave  = document.getElementById('btn-save');
+  const statusEl = document.getElementById('status');
+  const previewEl= document.getElementById('preview');
+
+  const params = new URLSearchParams(window.location.search);
+  const token  = params.get('token') || '';
+
+  // Persist the token so the "+ Add source" link on / can append it automatically.
+  // localStorage stays on this browser only - nothing sent to the server.
+  if (token) {
+    try { localStorage.setItem('sisyphus_admin_token', token); } catch (e) {}
+  }
+
+  let lastPreviewToken = null;
+
+  function setStatus(kind, msg) {
+    statusEl.className = 'status ' + kind;
+    statusEl.innerHTML = msg;
+  }
+
+  function clearPreview() {
+    previewEl.style.display = 'none';
+    previewEl.innerHTML = '';
+    btnSave.disabled = true;
+    lastPreviewToken = null;
+  }
+
+  function renderPreview(payload) {
+    const posts = payload.posts || [];
+    const strategy = payload.strategy || 'unknown';
+    previewEl.style.display = 'block';
+    let html = `<div style="color: var(--muted); font-size: 13px; margin-bottom: 8px;">Strategy: <code>${strategy}</code> &middot; ${posts.length} posts found &middot; showing first 5</div>`;
+    posts.slice(0, 5).forEach(p => {
+      const d = p.date && p.date.slice(0, 10);
+      html += `<div class="preview-post">
+        <div class="title">${escapeHtml(p.title)}</div>
+        <div class="meta">${d ? d + ' &middot; ' : ''}<a href="${escapeHtml(p.url)}" target="_blank">${escapeHtml(p.url)}</a></div>
+        ${p.summary ? `<div style="margin-top: 6px;">${escapeHtml(p.summary.slice(0, 200))}</div>` : ''}
+      </div>`;
+    });
+    previewEl.innerHTML = html;
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+
+  btnPrev.addEventListener('click', async () => {
+    clearPreview();
+    const url = urlIn.value.trim();
+    if (!url) { setStatus('err', 'URL is required'); return; }
+
+    btnPrev.disabled = true;
+    setStatus('info', '<span class="spinner"></span>Trying generic scraper&hellip; (LLM fallback may take up to a minute)');
+
+    try {
+      const resp = await fetch('/admin/preview?token=' + encodeURIComponent(token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url,
+          name: nameIn.value.trim(),
+          color: colorIn.value.trim(),
+          org_type: orgIn.value,
+        }),
+      });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        setStatus('err', 'Preview failed: ' + escapeHtml(data.error || resp.statusText));
+        return;
+      }
+
+      lastPreviewToken = data.preview_token;
+      const kind = data.strategy && data.strategy.startsWith('weak:') ? 'warn' : 'ok';
+      const msg  = kind === 'warn'
+        ? `Weak result (${data.strategy}). Review posts below before saving.`
+        : `Preview OK &mdash; strategy: <code>${escapeHtml(data.strategy)}</code>`;
+      setStatus(kind, msg);
+      renderPreview(data);
+      if (nameIn.value === '' && data.suggested_name)  nameIn.value  = data.suggested_name;
+      if (colorIn.value === '' && data.suggested_color) colorIn.value = data.suggested_color;
+      btnSave.disabled = false;
+    } catch (e) {
+      setStatus('err', 'Network error: ' + escapeHtml(String(e)));
+    } finally {
+      btnPrev.disabled = false;
+    }
+  });
+
+  btnSave.addEventListener('click', async () => {
+    if (!lastPreviewToken) { setStatus('err', 'Run preview first'); return; }
+    btnSave.disabled = true;
+    setStatus('info', '<span class="spinner"></span>Saving source&hellip;');
+
+    try {
+      const resp = await fetch('/admin/add-source?token=' + encodeURIComponent(token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preview_token: lastPreviewToken }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setStatus('err', 'Save failed: ' + escapeHtml(data.error || resp.statusText));
+        btnSave.disabled = false;
+        return;
+      }
+      setStatus('ok', `Saved <strong>${escapeHtml(data.name)}</strong> &rarr; <code>sources/${escapeHtml(data.module)}.py</code>. Feed will refresh on next request.`);
+      clearPreview();
+      urlIn.value = '';
+      nameIn.value = '';
+      colorIn.value = '';
+    } catch (e) {
+      setStatus('err', 'Network error: ' + escapeHtml(String(e)));
+      btnSave.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>
